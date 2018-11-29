@@ -19,20 +19,36 @@ class GridWorldEnv:
         self.agent_pos = [0, 0]
         self.back_step = 0
         # can only go back (L or U) twice
-        self.back_step_thres = 20000
+        self.back_step_thres = 400000
+
+        # self.grid = np.array(
+        #     [
+        #         [S, 0, 0, G],
+        #     ]
+        # )
 
         self.grid = np.array(
             [
-                [S, 0, 0, G],
+                [S, 0, 0, 0],
+                [0, W, W, 0],
+                [0, W, G, 0],
+                [0, 0, 0, 0],
             ]
         )
 
         # self.grid = np.array(
         #     [
-        #         [S, 0, 0, 0],
-        #         [0, W, W, 0],
-        #         [0, W, G, 0],
-        #         [0, 0, 0, 0],
+        #         [S, 0, 0],
+        #         [W, 0, 0],
+        #         [G, 0, 0],
+        #     ]
+        # )
+
+        # self.grid = np.array(
+        #     [
+        #         [S, 0],
+        #         [0, W],
+        #         [0, G],
         #     ]
         # )
 
@@ -115,7 +131,7 @@ class GridWorldEnv:
             ia.append(U)
         if x == h - 1 or self.grid[x + 1, y] == W:
             ia.append(D)
-        if bs >= self.back_step_thres:
+        if bs >= self.back_step_thres and len(ia) < 3:
             if L not in ia:
                 ia.append(L)
             if U not in ia:
