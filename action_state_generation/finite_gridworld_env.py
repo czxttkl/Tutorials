@@ -18,7 +18,7 @@ class GridWorldEnv:
         # x, y
         self.agent_pos = [0, 0]
         self.back_step = 0
-        # can only go back (L or U) twice
+        # can only go back (L or U) this many times. for testing limited length seqs
         self.back_step_thres = 400000
 
         # self.grid = np.array(
@@ -27,22 +27,22 @@ class GridWorldEnv:
         #     ]
         # )
 
-        self.grid = np.array(
-            [
-                [S, 0, 0, 0],
-                [0, W, W, 0],
-                [0, W, G, 0],
-                [0, 0, 0, 0],
-            ]
-        )
-
         # self.grid = np.array(
         #     [
-        #         [S, 0, 0],
-        #         [W, 0, 0],
-        #         [G, 0, 0],
+        #         [S, 0, 0, 0],
+        #         [0, W, W, 0],
+        #         [0, W, G, 0],
+        #         [0, 0, 0, 0],
         #     ]
         # )
+
+        self.grid = np.array(
+            [
+                [S, 0, 0],
+                [W, 0, 0],
+                [G, 0, 0],
+            ]
+        )
 
         # self.grid = np.array(
         #     [

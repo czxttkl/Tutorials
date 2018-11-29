@@ -20,7 +20,7 @@ class LSTM(nn.Module):
             self.tran_len = []
 
         def push(self, transitions):
-            """Saves a transition."""
+            """ Saves transitions of an episode """
             if len(self.memory) < self.capacity:
                 self.memory.append(None)
                 self.tran_len.append(None)
@@ -46,10 +46,12 @@ class LSTM(nn.Module):
                             num_layers=lstm_num_layer)
         self.fc = nn.Linear(lstm_hidden_dim, lstm_output_dim)
         self.memory = LSTM.ReplayMemory(replay_memory_size)
+
         self.lstm_input_dim = lstm_input_dim
         self.lstm_num_layer = lstm_num_layer
         self.lstm_hidden_dim = lstm_hidden_dim
         self.lstm_output_dim = lstm_output_dim
+
         self.gamma = gamma
         self.replay_memory_size = replay_memory_size
         self.training_batch_size = training_batch_size
@@ -86,7 +88,7 @@ class LSTM(nn.Module):
     def num_of_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def select_action(self, step, last_lstm_output, invalid_actions, action_dim, eps_thres):
+    def select_action(self, step, state, last_lstm_output, invalid_actions, action_dim, eps_thres):
         """ return action vector and action type accepted by env"""
         sample = random.random()
         # the first action is randomly selected
@@ -107,13 +109,10 @@ class LSTM(nn.Module):
         tensor_action = torch.zeros((1, 1, action_dim))
         tensor_action[0, 0, action] = 1
 
-        return tensor_action, tensor_action.squeeze().nonzero().item()
+        return tensor_action, action
 
     def optimize_model(self, env):
         BATCH_SIZE = self.training_batch_size
-
-        if len(self.memory) < BATCH_SIZE * 2:
-            return
 
         # refresh policy_net hidden state
         self.init_hidden(batch_size=BATCH_SIZE)
@@ -182,13 +181,14 @@ class LSTM(nn.Module):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-    def output(self, state, action):
-        """ output Q(s,a) """
+    def output(self, state, action, action_env, next_state):
+        """ output Q(s',a) for all a """
         assert len(action) == 1
         # shape: (1, lstm_output_dim)
         return self(action, [1])[0, :, :]
 
-    def print_memory(self, env, i_episode, state, action, action_env, invalid_actions, next_state, reward, last_output):
+    def print_memory(self, env, i_episode, state, action, action_env, invalid_actions,
+                     next_state, reward, last_output):
         state_indx = np.argwhere(state.detach().numpy() == 1)[0, 1]
         w, h = env.grid.shape[1], env.grid.shape[0]
         text_act = ['L', 'R', 'U', 'D'][action_env]

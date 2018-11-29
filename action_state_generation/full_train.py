@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from finite_gridworld_env import GridWorldEnv
 from model.lstm import LSTM
+from model.dqn import DQN
 
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -34,13 +35,13 @@ def test(env, i_train_episode, test_episode_durations, policy_net):
         invalid_actions = env.invalid_actions()
         action_dim = env.action_dim
         action, action_env = policy_net.select_action(
-            t, last_output, invalid_actions, action_dim, 0)
+            t, state, last_output, invalid_actions, action_dim, 0)
 
         # env step
         next_state, reward, done, _ = env.step(action_env)
 
-        # lstm needs to compute Q(s,a) for all a, which will be used in the next iteration
-        last_output = policy_net.output(state, action)
+        # needs to compute Q(s', a) for all a, which will be used in the next iteration
+        last_output = policy_net.output(state, action, action_env, next_state)
 
         policy_net.print_memory(
             env, 'test',
@@ -82,6 +83,17 @@ def train(model_str):
                           lstm_hidden_dim, lstm_output_dim,
                           GAMMA, REPLAY_MEMORY_SIZE, BATCH_SIZE)\
                      .to(device)
+    elif model_str == 'dqn':
+        dqn_input_dim = env.grid.shape[0] * env.grid.shape[1]
+        dqn_hidden_dim = 168
+        dqn_num_layer = 2
+        dqn_output_dim = env.action_dim
+        policy_net = DQN(dqn_input_dim, dqn_num_layer,
+                         dqn_hidden_dim, dqn_output_dim,
+                         GAMMA, REPLAY_MEMORY_SIZE, BATCH_SIZE)\
+                     .to(device)
+    else:
+        raise Exception
 
     print(policy_net)
     print("trainable param num:", policy_net.num_of_params())
@@ -103,15 +115,16 @@ def train(model_str):
             invalid_actions = env.invalid_actions()
             action_dim = env.action_dim
             action, action_env = policy_net.select_action(
-                t, last_output, invalid_actions, action_dim, EPS_THRES)
+                t, state, last_output, invalid_actions, action_dim, EPS_THRES)
 
             # env step
             next_state, reward, done, _ = env.step(action_env)
+
+            # needs to compute Q(s',a) for all a, which will be used in the next iteration
+            last_output = policy_net.output(state, action, action_env, next_state)
+
             if done:
                 next_state = None
-
-            # lstm needs to compute Q(s,a) for all a, which will be used in the next iteration
-            last_output = policy_net.output(state, action)
 
             policy_net.print_memory(
                 env, i_episode,
@@ -139,7 +152,8 @@ def train(model_str):
             test(env, i_episode, test_episode_durations, policy_net)
 
         # Perform one step of the optimization
-        policy_net.optimize_model(env)
+        if i_episode > LEARNING_START_EPISODES:
+            policy_net.optimize_model(env)
 
     print('Complete Training')
     # print(np.average(episode_durations))
@@ -157,20 +171,18 @@ def main(model_str):
     test_episode_durations_ave = np.average(test_episode_durations, axis=0)
     test_episode_durations_std = np.std(test_episode_durations, axis=0)
     for i, (ave, std) in enumerate(zip(test_episode_durations_ave, test_episode_durations_std)):
-        print("Episode {}: {:.2f} +- {:.2f}".format(i*TEST_EVERY_EPISODE, ave, std))
+        print("Episode {}: {:.2f} +- {:.2f}".format(i * TEST_EVERY_EPISODE, ave, std))
 
 
 if __name__ == '__main__':
     TRAIN_TIMES = 1
     BATCH_SIZE = 4
     GAMMA = 0.9
-    EPS_START = 0.9
-    EPS_END = 0.05
-    EPS_DECAY = 200
     TEST_EVERY_EPISODE = 10
     EPS_THRES = 0.4
     REPLAY_MEMORY_SIZE = 1000
     NUM_EPISODES = 2501
+    LEARNING_START_EPISODES = 500
 
     model_str = 'lstm'
 
