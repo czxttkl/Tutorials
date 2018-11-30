@@ -27,22 +27,22 @@ class GridWorldEnv:
         #     ]
         # )
 
-        # self.grid = np.array(
-        #     [
-        #         [S, 0, 0, 0],
-        #         [0, W, W, 0],
-        #         [0, W, G, 0],
-        #         [0, 0, 0, 0],
-        #     ]
-        # )
-
         self.grid = np.array(
             [
-                [S, 0, 0],
-                [W, 0, 0],
-                [G, 0, 0],
+                [S, 0, 0, 0],
+                [0, W, W, 0],
+                [0, W, G, 0],
+                [0, 0, 0, 0],
             ]
         )
+
+        # self.grid = np.array(
+        #     [
+        #         [S, 0, 0],
+        #         [W, 0, 0],
+        #         [G, 0, 0],
+        #     ]
+        # )
 
         # self.grid = np.array(
         #     [

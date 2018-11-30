@@ -66,10 +66,6 @@ def test(env, i_train_episode, test_episode_durations, policy_net):
     print("-------------test at {} train episode------------".format(i_train_episode))
 
 
-######################################################
-#                       Train                        #
-######################################################
-
 def train(model_str):
     episode_durations = []
     test_episode_durations = []
@@ -140,7 +136,6 @@ def train(model_str):
             # Move to the next state
             state = next_state
 
-            # plot if done
             if done:
                 episode_durations.append(t + 1)
                 break
@@ -175,13 +170,13 @@ def main(model_str):
 
 
 if __name__ == '__main__':
-    TRAIN_TIMES = 1
+    TRAIN_TIMES = 5
     BATCH_SIZE = 4
     GAMMA = 0.9
     TEST_EVERY_EPISODE = 10
     EPS_THRES = 0.4
     REPLAY_MEMORY_SIZE = 1000
-    NUM_EPISODES = 2501
+    NUM_EPISODES = 5001
     LEARNING_START_EPISODES = 500
 
     model_str = 'lstm'
