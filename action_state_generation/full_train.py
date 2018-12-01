@@ -1,14 +1,11 @@
-import random
 import numpy as np
 from collections import namedtuple
 from itertools import count
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 
-from finite_gridworld_env import GridWorldEnv
+from env.finite_gridworld_env import GridWorldEnv
 from model.lstm import LSTM
 from model.dqn import DQN
 
@@ -170,13 +167,13 @@ def main(model_str):
 
 
 if __name__ == '__main__':
-    TRAIN_TIMES = 5
+    TRAIN_TIMES = 1
     BATCH_SIZE = 4
     GAMMA = 0.9
     TEST_EVERY_EPISODE = 10
     EPS_THRES = 0.4
     REPLAY_MEMORY_SIZE = 1000
-    NUM_EPISODES = 5001
+    NUM_EPISODES = 2001
     LEARNING_START_EPISODES = 500
 
     model_str = 'lstm'
