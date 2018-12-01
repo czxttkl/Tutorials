@@ -31,18 +31,18 @@ def test(env, i_train_episode, test_episode_durations, policy_net):
         # Select and perform an action
         invalid_actions = env.invalid_actions()
         action_dim = env.action_dim
-        action, action_env = policy_net.select_action(
+        action = policy_net.select_action(
             t, state, last_output, invalid_actions, action_dim, 0)
 
         # env step
-        next_state, reward, done, _ = env.step(action_env)
+        next_state, reward, done, _ = env.step(action)
 
         # needs to compute Q(s', a) for all a, which will be used in the next iteration
-        last_output = policy_net.output(state, action, action_env, next_state)
+        last_output = policy_net.output(state, action, next_state)
 
         policy_net.print_memory(
             env, 'test',
-            state, action, action_env,
+            state, action,
             invalid_actions, next_state, reward,
             last_output
         )
@@ -107,21 +107,21 @@ def train(model_str):
             # Select and perform an action
             invalid_actions = env.invalid_actions()
             action_dim = env.action_dim
-            action, action_env = policy_net.select_action(
+            action = policy_net.select_action(
                 t, state, last_output, invalid_actions, action_dim, EPS_THRES)
 
             # env step
-            next_state, reward, done, _ = env.step(action_env)
+            next_state, reward, done, _ = env.step(action)
 
             # needs to compute Q(s',a) for all a, which will be used in the next iteration
-            last_output = policy_net.output(state, action, action_env, next_state)
+            last_output = policy_net.output(state, action, next_state)
 
             if done:
                 next_state = None
 
             policy_net.print_memory(
                 env, i_episode,
-                state, action, action_env,
+                state, action,
                 invalid_actions, next_state, reward,
                 last_output
             )

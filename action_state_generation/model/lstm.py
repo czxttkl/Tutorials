@@ -57,10 +57,6 @@ class LSTM(nn.Module):
         self.training_batch_size = training_batch_size
 
     def init_hidden(self, batch_size):
-        # Before we've done anything, we dont have any hidden state.
-        # Refer to the Pytorch documentation to see exactly
-        # why they have this dimensionality.
-        # The axes semantics are (minibatch_size, num_layers, hidden_dim)
         self.hidden = torch.zeros(self.lstm_num_layer, batch_size, self.lstm_hidden_dim), \
                       torch.zeros(self.lstm_num_layer, batch_size, self.lstm_hidden_dim)
 
@@ -106,10 +102,7 @@ class LSTM(nn.Module):
             while action in invalid_actions:
                 action = random.randrange(4)
 
-        tensor_action = torch.zeros((1, 1, action_dim))
-        tensor_action[0, 0, action] = 1
-
-        return tensor_action, action
+        return action
 
     def optimize_model(self, env):
         BATCH_SIZE = self.training_batch_size
@@ -135,10 +128,10 @@ class LSTM(nn.Module):
         valid_action_masks = torch.ones([BATCH_SIZE, max_seq_len, self.lstm_output_dim])
 
         for tran_len, transition in zip(transitions_len, transitions):
-            transition_actions = list(map(lambda x: x.action, transition))
+            transition_actions = list(map(lambda x: self.to_action_vec(x.action), transition))
             transition_actions = torch.cat(transition_actions).squeeze(1)
             action_vecs[i, :tran_len, :] = transition_actions
-            transition_action_indexs = list(map(lambda x: x.action.squeeze().nonzero(), transition))
+            transition_action_indexs = list(map(lambda x: torch.tensor([[x.action]]), transition))
             action_indexs[i, :tran_len, :] = torch.cat(transition_action_indexs)
             transition_rewards = torch.tensor(list(map(lambda x: x.reward, transition)))
             last_rewards[i, :tran_len] = transition_rewards
@@ -181,17 +174,21 @@ class LSTM(nn.Module):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-    def output(self, state, action, action_env, next_state):
+    def output(self, state, action, next_state):
         """ output Q(s',a) for all a """
-        assert len(action) == 1
         # shape: (1, lstm_output_dim)
-        return self(action, [1])[0, :, :]
+        return self(self.to_action_vec(action), [1])[0, :, :]
 
-    def print_memory(self, env, i_episode, state, action, action_env, invalid_actions,
+    def to_action_vec(self, action):
+        tensor_action = torch.zeros((1, 1, self.lstm_output_dim))
+        tensor_action[0, 0, action] = 1
+        return tensor_action
+
+    def print_memory(self, env, i_episode, state, action, invalid_actions,
                      next_state, reward, last_output):
         state_indx = np.argwhere(state.detach().numpy() == 1)[0, 1]
         w, h = env.grid.shape[1], env.grid.shape[0]
-        text_act = ['L', 'R', 'U', 'D'][action_env]
+        text_act = ['L', 'R', 'U', 'D'][action]
         if next_state is None:
             text_next_state = '     G,  '
         else:
@@ -202,7 +199,7 @@ class LSTM(nn.Module):
               'push to mem:',
               (state_indx // w, state_indx % w),
               text_next_state,
-              text_act, "_", action_env,
+              text_act, "_", action,
               ', reward:', reward.numpy()[0],
               ', invalid actions', invalid_actions,
               'mem size:', len(self.memory))
