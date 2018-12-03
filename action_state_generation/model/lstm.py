@@ -186,18 +186,17 @@ class LSTM(nn.Module):
 
     def print_memory(self, env, i_episode, state, action, invalid_actions,
                      next_state, reward, last_output):
-        state_indx = np.argwhere(state.detach().numpy() == 1)[0, 1]
-        w, h = env.grid.shape[1], env.grid.shape[0]
+        state_x, state_y = env.state_vec_to_x_y(state)
         text_act = ['L', 'R', 'U', 'D'][action]
         if next_state is None:
             text_next_state = '     G,  '
         else:
-            next_state_indx = np.argwhere(next_state.detach().numpy() == 1)[0, 1]
-            text_next_state = (next_state_indx // w, next_state_indx % w), ", "
+            next_state_x, next_state_y = env.state_vec_to_x_y(next_state)
+            text_next_state = (next_state_x, next_state_y), ", "
         print('episode',
               i_episode,
               'push to mem:',
-              (state_indx // w, state_indx % w),
+              (state_x, state_y),
               text_next_state,
               text_act, "_", action,
               ', reward:', reward.numpy()[0],

@@ -1,3 +1,7 @@
+"""
+A grid world environment
+Rule of reward: after reaching R cell, get 10
+"""
 import numpy as np
 import torch
 
@@ -59,27 +63,11 @@ class GridWorldEnv:
 
     def cur(self):
         x, y = self.agent_pos
-        w, h = self.grid.shape[1], self.grid.shape[0]
-        out = np.zeros(w * h + 1)
-        out[x * w + y] = 1
-        out[-1] = self.back_step
-        out_torch = torch.from_numpy(out).float()
-        return out_torch.unsqueeze(0).to(self.device)
+        return x, y, self.back_step
 
-    def state_vec_from_x_y_backstep(self, x, y, backstep):
-        w, h = self.grid.shape[1], self.grid.shape[0]
-        out = np.zeros(w * h + 1)
-        out[x * w + y] = 1
-        out[-1] = backstep
-        out_torch = torch.from_numpy(out).float()
-        return out_torch.unsqueeze(0).to(self.device)
-
-    def state_vec_to_x_y_backstep(self, state):
-        pos = (state[0, :-1].squeeze() == 1).nonzero().item()
-        w, h = self.grid.shape[1], self.grid.shape[0]
-        x, y = pos // w, pos % w
-        backstep = state[0, -1].item()
-        return x, y, backstep
+    def state_vec_to_x_y(self, state):
+        x, y, _ = state
+        return x, y
 
     def reset(self):
         self.agent_pos = [0, 0]
@@ -117,8 +105,8 @@ class GridWorldEnv:
         return self.cur(), reward, done, None
 
     def invalid_actions(self):
-        x, y = self.agent_pos
-        return self.invalid_actions_by_x_y_backstep(x, y, self.back_step)
+        x, y, bs = self.cur()
+        return self.invalid_actions_by_x_y_backstep(x, y, bs)
 
     def invalid_actions_by_x_y_backstep(self, x, y, bs):
         w, h = self.grid.shape[1], self.grid.shape[0]
@@ -139,6 +127,6 @@ class GridWorldEnv:
         return ia
 
     def invalid_actions_by_state(self, state):
-        x, y, bs = self.state_vec_to_x_y_backstep(state)
+        x, y, bs = state
         invalid_actions = self.invalid_actions_by_x_y_backstep(x, y, bs)
         return invalid_actions
