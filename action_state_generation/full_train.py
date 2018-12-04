@@ -5,7 +5,6 @@ from itertools import count
 import torch
 import torch.optim as optim
 
-from env.finite_gridworld_env import GridWorldEnv
 from model.lstm import LSTM
 from model.dqn import DQN
 
@@ -16,7 +15,7 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'invalid_actions', 'next_state', 'reward'))
 
 
-def test(env, i_train_episode, test_episode_durations, policy_net):
+def test(env, i_train_episode, policy_net):
     print("-------------test at {} train episode------------".format(i_train_episode))
     # Initialize the environment and state
     env.reset()
@@ -44,29 +43,37 @@ def test(env, i_train_episode, test_episode_durations, policy_net):
             env, 'test',
             state, action,
             invalid_actions, next_state, reward,
-            last_output
+            last_output,
+            VERBOSE
         )
 
         # Move to the next state
         state = next_state
 
         if done:
-            test_episode_durations.append(t + 1)
+            duration = t+1
+            final_reward = reward.numpy()[0]
             break
 
         if t > 30:
-            test_episode_durations.append(30)
+            duration = 30
+            final_reward = reward.numpy()[0]
             break
 
-    print('Complete Testing')
-    print(test_episode_durations)
-    print("-------------test at {} train episode------------".format(i_train_episode))
+    return duration, final_reward
 
 
-def train(model_str):
+def train(model_str, env_str):
     episode_durations = []
     test_episode_durations = []
-    env = GridWorldEnv(device)
+    test_episode_rewards = []
+
+    if env_str == 'finite':
+        from env.finite_gridworld_env import GridWorldEnv
+        env = GridWorldEnv(device)
+    elif env_str == 'rnn':
+        from env.rnn_gridworld_env import GridWorldEnv
+        env = GridWorldEnv(device)
 
     if model_str == 'lstm':
         lstm_input_dim = lstm_output_dim = env.action_dim
@@ -123,7 +130,8 @@ def train(model_str):
                 env, i_episode,
                 state, action,
                 invalid_actions, next_state, reward,
-                last_output
+                last_output,
+                VERBOSE
             )
 
             step_transition = Transition(state=state, action=action, invalid_actions=invalid_actions,
@@ -141,28 +149,45 @@ def train(model_str):
         policy_net.memory.push(episode_memory)
 
         if i_episode % TEST_EVERY_EPISODE == 0:
-            test(env, i_episode, test_episode_durations, policy_net)
+            test_duration, final_test_reward = test(env, i_episode, policy_net)
+            test_episode_durations.append(test_duration)
+            test_episode_rewards.append(final_test_reward)
+            print('Complete Testing')
+            print(test_episode_durations)
+            print(test_episode_rewards)
+            print("-------------test at {} train episode------------".format(i_episode))
 
         # Perform one step of the optimization
         if i_episode > LEARNING_START_EPISODES:
             policy_net.optimize_model(env)
 
     print('Complete Training')
-    # print(np.average(episode_durations))
-    # print(episode_durations)
-    return test_episode_durations
+    return test_episode_durations, test_episode_rewards
 
 
-def main(model_str):
-    test_episode_durations = []
+def main(model_str, env_str):
+    test_durations = []
+    test_rewards = []
     for i in range(TRAIN_TIMES):
-        t = train(model_str)
-        test_episode_durations.append(t)
+        duration, reward = train(model_str, env_str)
+        test_durations.append(duration)
+        test_rewards.append(reward)
 
-    test_episode_durations = np.vstack(test_episode_durations)
-    test_episode_durations_ave = np.average(test_episode_durations, axis=0)
-    test_episode_durations_std = np.std(test_episode_durations, axis=0)
-    for i, (ave, std) in enumerate(zip(test_episode_durations_ave, test_episode_durations_std)):
+    test_durations = np.vstack(test_durations)
+    test_durations_ave = np.average(test_durations, axis=0)
+    test_durations_std = np.std(test_durations, axis=0)
+    print("------------- Test Steps --------------")
+    for i, (ave, std) in enumerate(zip(test_durations_ave, test_durations_std)):
+        print("Episode {}: {:.2f} +- {:.2f}".format(i * TEST_EVERY_EPISODE, ave, std))
+
+    test_rewards = np.vstack(test_rewards)
+    test_rewards_ave = np.average(test_rewards, axis=0)
+    test_rewards_std = np.std(test_rewards, axis=0)
+
+    print()
+
+    print("------------- Test Rewards --------------")
+    for i, (ave, std) in enumerate(zip(test_rewards_ave, test_rewards_std)):
         print("Episode {}: {:.2f} +- {:.2f}".format(i * TEST_EVERY_EPISODE, ave, std))
 
 
@@ -173,12 +198,15 @@ if __name__ == '__main__':
     TEST_EVERY_EPISODE = 10
     EPS_THRES = 0.4
     REPLAY_MEMORY_SIZE = 1000
-    NUM_EPISODES = 2001
+    NUM_EPISODES = 3001
     LEARNING_START_EPISODES = 500
+    VERBOSE = False
 
     model_str = 'lstm'
+    # env_str = 'finite'
+    env_str = 'rnn'
 
-    main(model_str)
+    main(model_str, env_str)
 
 
 

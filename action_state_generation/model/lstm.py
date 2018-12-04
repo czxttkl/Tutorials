@@ -27,7 +27,7 @@ class LSTM(nn.Module):
             self.memory[self.position] = transitions
             self.tran_len[self.position] = len(transitions)
             self.position = (self.position + 1) % self.capacity
-            print("push an episode of {} transitions, mem size {}, ave mem size {}"
+            print("push an episode of {} transitions, mem size {}, ave mem size {}\n"
                   .format(len(transitions), len(self.memory), np.average(self.tran_len)))
 
         def sample(self, batch_size):
@@ -165,7 +165,7 @@ class LSTM(nn.Module):
 
         # Compute Huber loss
         loss = F.smooth_l1_loss(cur_state_action_values, expected_state_action_values.detach())
-        print(loss.item())
+        print('loss:', loss.item())
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -185,7 +185,7 @@ class LSTM(nn.Module):
         return tensor_action
 
     def print_memory(self, env, i_episode, state, action, invalid_actions,
-                     next_state, reward, last_output):
+                     next_state, reward, last_output, verbose):
         state_x, state_y = env.state_vec_to_x_y(state)
         text_act = ['L', 'R', 'U', 'D'][action]
         if next_state is None:
@@ -193,14 +193,15 @@ class LSTM(nn.Module):
         else:
             next_state_x, next_state_y = env.state_vec_to_x_y(next_state)
             text_next_state = (next_state_x, next_state_y), ", "
-        print('episode',
-              i_episode,
-              'push to mem:',
-              (state_x, state_y),
-              text_next_state,
-              text_act, "_", action,
-              ', reward:', reward.numpy()[0],
-              ', invalid actions', invalid_actions,
-              'mem size:', len(self.memory))
-        print("last output", last_output.detach().numpy()[0])
-        print()
+        # print if verbose=True or verbose=False && terminal state or verbose=False && test
+        if verbose or next_state is None or i_episode == 'test':
+            print('episode',
+                  i_episode,
+                  'push to mem:',
+                  (state_x, state_y),
+                  text_next_state,
+                  text_act, "_", action,
+                  ', reward:', reward.numpy()[0],
+                  ', invalid actions', invalid_actions,
+                  'mem size:', len(self.memory))
+            print("last output", last_output.detach().numpy()[0])

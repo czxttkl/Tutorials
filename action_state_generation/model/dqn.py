@@ -121,7 +121,7 @@ class DQN(nn.Module):
 
         # Compute Huber loss
         loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
-        print(loss.item())
+        print('loss:', loss.item())
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -135,7 +135,7 @@ class DQN(nn.Module):
         return self(next_state[:, :-1])
 
     def print_memory(self, env, i_episode, state, action, action_env, invalid_actions,
-                     next_state, reward, last_output):
+                     next_state, reward, last_output, verbose):
         state_indx = np.argwhere(state.detach().numpy() == 1)[0, 1]
         w, h = env.grid.shape[1], env.grid.shape[0]
         text_act = ['L', 'R', 'U', 'D'][action_env]
@@ -144,14 +144,15 @@ class DQN(nn.Module):
         else:
             next_state_indx = np.argwhere(next_state.detach().numpy() == 1)[0, 1]
             text_next_state = (next_state_indx // w, next_state_indx % w), ", "
-        print('episode',
-              i_episode,
-              'push to mem:',
-              (state_indx // w, state_indx % w),
-              text_next_state,
-              text_act, "_", action_env,
-              ', reward:', reward.numpy()[0],
-              ', invalid actions', invalid_actions,
-              'mem size:', len(self.memory))
-        print("last output", last_output.detach().numpy()[0])
-        print()
+        # print if verbose=True or verbose=False && terminal state or verbose=False && test
+        if verbose or next_state is None or i_episode == 'test':
+            print('episode',
+                  i_episode,
+                  'push to mem:',
+                  (state_indx // w, state_indx % w),
+                  text_next_state,
+                  text_act, "_", action_env,
+                  ', reward:', reward.numpy()[0],
+                  ', invalid actions', invalid_actions,
+                  'mem size:', len(self.memory))
+            print("last output", last_output.detach().numpy()[0])
