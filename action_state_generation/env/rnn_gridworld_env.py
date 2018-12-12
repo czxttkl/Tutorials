@@ -131,6 +131,15 @@ class GridWorldEnv:
         tensor_action[0, 0, action] = 1
         return tensor_action
 
+    def state_to_state_vec_dqn(self, state):
+        """ from state representation to state vector used in dqn """
+        x, y, _, _ = state
+        w, h = self.grid.shape[1], self.grid.shape[0]
+        out = np.zeros((1, w * h))
+        out[0, x * w + y] = 1
+        out_torch = torch.from_numpy(out).float()
+        return out_torch
+
     def reset(self):
         self.agent_pos = [0, 0]
         self.num_step = 0
