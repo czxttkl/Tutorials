@@ -65,9 +65,23 @@ class GridWorldEnv:
         x, y = self.agent_pos
         return x, y, self.back_step
 
-    def state_vec_to_x_y(self, state):
+    def state_to_x_y(self, state):
         x, y, _ = state
         return x, y
+
+    def action_to_action_vec_lstm(self, action):
+        tensor_action = torch.zeros((1, 1, self.action_dim))
+        tensor_action[0, 0, action] = 1
+        return tensor_action
+
+    def state_to_state_vec_dqn(self, state):
+        """ from state representation to state vector used in dqn """
+        x, y, _ = state
+        w, h = self.grid.shape[1], self.grid.shape[0]
+        out = np.zeros((1, w * h))
+        out[0, x * w + y] = 1
+        out_torch = torch.from_numpy(out).float()
+        return out_torch
 
     def reset(self):
         self.agent_pos = [0, 0]
@@ -102,7 +116,7 @@ class GridWorldEnv:
         reward = torch.tensor([reward], device=self.device).float()
         if action == L or action == U:
             self.back_step += 1
-        return self.cur(), reward, done, None
+        return self.cur(), self.invalid_actions(), reward, done, None
 
     def invalid_actions(self):
         x, y, bs = self.cur()

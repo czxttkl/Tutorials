@@ -84,7 +84,7 @@ class LSTM(nn.Module):
     def num_of_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def select_action(self, step, state, last_lstm_output, invalid_actions, action_dim, eps_thres):
+    def select_action(self, env, step, state, last_lstm_output, invalid_actions, action_dim, eps_thres):
         """ return action vector and action type accepted by env"""
         sample = random.random()
         # the first action is randomly selected
@@ -101,7 +101,6 @@ class LSTM(nn.Module):
             action = random.randrange(4)
             while action in invalid_actions:
                 action = random.randrange(4)
-
         return action
 
     def optimize_model(self, env):
@@ -128,7 +127,7 @@ class LSTM(nn.Module):
         valid_action_masks = torch.ones([BATCH_SIZE, max_seq_len, self.lstm_output_dim])
 
         for tran_len, transition in zip(transitions_len, transitions):
-            transition_actions = list(map(lambda x: self.to_action_vec(x.action), transition))
+            transition_actions = list(map(lambda x: env.action_to_action_vec_lstm(x.action), transition))
             transition_actions = torch.cat(transition_actions).squeeze(1)
             action_vecs[i, :tran_len, :] = transition_actions
             transition_action_indexs = list(map(lambda x: torch.tensor([[x.action]]), transition))
@@ -174,24 +173,20 @@ class LSTM(nn.Module):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-    def output(self, state, action, next_state):
+    def output(self, env, action, next_state):
         """ output Q(s',a) for all a """
         # shape: (1, lstm_output_dim)
-        return self(self.to_action_vec(action), [1])[0, :, :]
-
-    def to_action_vec(self, action):
-        tensor_action = torch.zeros((1, 1, self.lstm_output_dim))
-        tensor_action[0, 0, action] = 1
-        return tensor_action
+        return self(env.action_to_action_vec_lstm(action), [1])[0, :, :]
 
     def print_memory(self, env, i_episode, state, action, invalid_actions,
-                     next_state, reward, last_output, verbose):
-        state_x, state_y = env.state_vec_to_x_y(state)
+                     next_state, reward, last_output, next_invalid_actions,
+                     verbose):
+        state_x, state_y = env.state_to_x_y(state)
         text_act = ['L', 'R', 'U', 'D'][action]
         if next_state is None:
             text_next_state = '     G,  '
         else:
-            next_state_x, next_state_y = env.state_vec_to_x_y(next_state)
+            next_state_x, next_state_y = env.state_to_x_y(next_state)
             text_next_state = (next_state_x, next_state_y), ", "
         # print if verbose=True or verbose=False && terminal state or verbose=False && test
         if verbose or next_state is None or i_episode == 'test':
@@ -204,4 +199,7 @@ class LSTM(nn.Module):
                   ', reward:', reward.numpy()[0],
                   ', invalid actions', invalid_actions,
                   'mem size:', len(self.memory))
-            print("last output", last_output.detach().numpy()[0])
+
+            last_output_np = last_output.detach().numpy()[0]
+            last_output_np[next_invalid_actions] = 0
+            print("next output", last_output_np)

@@ -123,8 +123,13 @@ class GridWorldEnv:
         # return out_torch.unsqueeze(0).to(self.device)
         return x, y, self.num_step, self.act_seq
 
-    def state_vec_to_x_y(self, state):
+    def state_to_x_y(self, state):
         return state[0], state[1]
+
+    def action_to_action_vec_lstm(self, action):
+        tensor_action = torch.zeros((1, 1, self.action_dim))
+        tensor_action[0, 0, action] = 1
+        return tensor_action
 
     def reset(self):
         self.agent_pos = [0, 0]
@@ -170,7 +175,7 @@ class GridWorldEnv:
         else:
             reward = 0
         reward = torch.tensor([reward], device=self.device).float()
-        return self.cur(), reward, done, None
+        return self.cur(), self.invalid_actions(), reward, done, None
 
     def cal_rnn_reward(self):
         tensor_action = torch.zeros((1, len(self.act_seq), self.action_dim))
@@ -199,6 +204,6 @@ class GridWorldEnv:
         return ia
 
     def invalid_actions_by_state(self, state):
-        x, y = self.state_vec_to_x_y(state)
+        x, y = self.state_to_x_y(state)
         invalid_actions = self.invalid_actions_by_x_y(x, y)
         return invalid_actions

@@ -20,6 +20,7 @@ def test(env, i_train_episode, policy_net):
     # Initialize the environment and state
     env.reset()
     state = env.cur()
+    invalid_actions = env.invalid_actions()
     last_output = None
     # reset the LSTM hidden state. Must be done before you run a new episode. Otherwise the LSTM will treat
     # a new episode as a continuation of the last episode
@@ -28,27 +29,32 @@ def test(env, i_train_episode, policy_net):
 
     for t in count():
         # Select and perform an action
-        invalid_actions = env.invalid_actions()
         action_dim = env.action_dim
         action = policy_net.select_action(
-            t, state, last_output, invalid_actions, action_dim, 0)
+            env, t, state, last_output, invalid_actions, action_dim, 0)
 
         # env step
-        next_state, reward, done, _ = env.step(action)
+        next_state, next_invalid_actions, reward, done, _ = env.step(action)
 
         # needs to compute Q(s', a) for all a, which will be used in the next iteration
-        last_output = policy_net.output(state, action, next_state)
+        last_output = policy_net.output(env, action, next_state)
 
         policy_net.print_memory(
-            env, 'test',
-            state, action,
-            invalid_actions, next_state, reward,
+            env,
+            'test',
+            state,
+            action,
+            invalid_actions,
+            next_state,
+            reward,
             last_output,
+            next_invalid_actions,
             VERBOSE
         )
 
         # Move to the next state
         state = next_state
+        invalid_actions = next_invalid_actions
 
         if done:
             duration = t+1
@@ -84,7 +90,7 @@ def train(model_str, env_str):
                           GAMMA, REPLAY_MEMORY_SIZE, BATCH_SIZE)\
                      .to(device)
     elif model_str == 'dqn':
-        dqn_input_dim = env.grid.shape[0] * env.grid.shape[1]
+        dqn_input_dim = env.state_dim
         dqn_hidden_dim = 168
         dqn_num_layer = 2
         dqn_output_dim = env.action_dim
@@ -103,6 +109,7 @@ def train(model_str, env_str):
         # Initialize the environment and state
         env.reset()
         state = env.cur()
+        invalid_actions = env.invalid_actions()
         episode_memory = []
         last_output = None
         # reset the LSTM hidden state. Must be done before you run a new episode. Otherwise the LSTM will treat
@@ -112,25 +119,29 @@ def train(model_str, env_str):
 
         for t in count():
             # Select and perform an action
-            invalid_actions = env.invalid_actions()
             action_dim = env.action_dim
             action = policy_net.select_action(
-                t, state, last_output, invalid_actions, action_dim, EPS_THRES)
+                env, t, state, last_output, invalid_actions, action_dim, EPS_THRES)
 
             # env step
-            next_state, reward, done, _ = env.step(action)
+            next_state, next_invalid_actions, reward, done, _ = env.step(action)
 
             # needs to compute Q(s',a) for all a, which will be used in the next iteration
-            last_output = policy_net.output(state, action, next_state)
+            last_output = policy_net.output(env, action, next_state)
 
             if done:
                 next_state = None
 
             policy_net.print_memory(
-                env, i_episode,
-                state, action,
-                invalid_actions, next_state, reward,
+                env,
+                i_episode,
+                state,
+                action,
+                invalid_actions,
+                next_state,
+                reward,
                 last_output,
+                next_invalid_actions,
                 VERBOSE
             )
 
@@ -140,6 +151,7 @@ def train(model_str, env_str):
 
             # Move to the next state
             state = next_state
+            invalid_actions = next_invalid_actions
 
             if done:
                 episode_durations.append(t + 1)
@@ -203,6 +215,7 @@ if __name__ == '__main__':
     VERBOSE = False
 
     model_str = 'lstm'
+    # model_str = 'dqn'
     # env_str = 'finite'
     env_str = 'rnn'
 

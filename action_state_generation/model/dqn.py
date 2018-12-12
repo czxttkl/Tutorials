@@ -66,26 +66,25 @@ class DQN(nn.Module):
     def num_of_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def select_action(self, step, state, last_output, invalid_actions, action_dim, eps_thres):
+    def select_action(self, env, step, state, last_output, invalid_actions, action_dim, eps_thres):
         sample = random.random()
         # the first action is randomly selected
         if step == 0:
             action = random.randrange(4)
             while action in invalid_actions:
                 action = random.randrange(4)
-            return torch.tensor([[action]], dtype=torch.long), action
         # greedy-epsilon
         elif sample > eps_thres:
             with torch.no_grad():
-                action_output = self(state[:, :-1])
+                # action_output = self(env.state_to_state_vec_dqn(state))
+                action_output = last_output
                 action_output[0, invalid_actions] = -999999.9
-                action_vec = action_output.max(1)[1].detach().view(1, 1)
-                return action_vec, action_vec.item()
+                action = action_output.max(1)[1].detach().item()
         else:
             action = random.randrange(4)
             while action in invalid_actions:
                 action = random.randrange(4)
-            return torch.tensor([[action]], dtype=torch.long), action
+        return action
 
     def optimize_model(self, env):
         BATCH_SIZE = self.training_batch_size
@@ -93,8 +92,8 @@ class DQN(nn.Module):
         transitions = self.memory.sample(BATCH_SIZE)
 
         # shape: (batch_size, state_dim)
-        state_batch = torch.cat([t.state[:, :-1] for t in transitions])
-        action_batch = torch.cat([t.action for t in transitions])
+        state_batch = torch.cat([env.state_to_state_vec_dqn(t.state) for t in transitions])
+        action_batch = torch.cat([torch.tensor([[t.action]], dtype=torch.long) for t in transitions])
         reward_batch = torch.cat([t.reward for t in transitions])
 
         next_state_batch = torch.zeros([BATCH_SIZE, state_batch.size()[1]], dtype=torch.float)
@@ -104,7 +103,7 @@ class DQN(nn.Module):
         for i, t in enumerate(transitions):
             if t.next_state is not None:
                 non_final_mask[i, :] = 1
-                next_state_batch[i, :] = t.next_state[:, :-1]
+                next_state_batch[i, :] = env.state_to_state_vec_dqn(t.next_state)
                 inv_acts = env.invalid_actions_by_state(t.next_state)
                 valid_action_masks[i, inv_acts] = 0
 
@@ -130,29 +129,34 @@ class DQN(nn.Module):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-    def output(self, state, action, action_env, next_state):
+    def output(self, env, action, next_state):
         """ output Q(s',a) for all a """
-        return self(next_state[:, :-1])
+        # return self(next_state[:, :-1])
+        next_state_vec = env.state_to_state_vec_dqn(next_state)
+        return self(next_state_vec)
 
-    def print_memory(self, env, i_episode, state, action, action_env, invalid_actions,
-                     next_state, reward, last_output, verbose):
-        state_indx = np.argwhere(state.detach().numpy() == 1)[0, 1]
-        w, h = env.grid.shape[1], env.grid.shape[0]
-        text_act = ['L', 'R', 'U', 'D'][action_env]
+    def print_memory(self, env, i_episode, state, action, invalid_actions,
+                     next_state, reward, last_output, next_invalid_actions,
+                     verbose):
+        state_x, state_y = env.state_to_x_y(state)
+        text_act = ['L', 'R', 'U', 'D'][action]
         if next_state is None:
             text_next_state = '     G,  '
         else:
-            next_state_indx = np.argwhere(next_state.detach().numpy() == 1)[0, 1]
-            text_next_state = (next_state_indx // w, next_state_indx % w), ", "
+            next_state_x, next_state_y = env.state_to_x_y(next_state)
+            text_next_state = (next_state_x, next_state_y), ", "
         # print if verbose=True or verbose=False && terminal state or verbose=False && test
         if verbose or next_state is None or i_episode == 'test':
             print('episode',
                   i_episode,
                   'push to mem:',
-                  (state_indx // w, state_indx % w),
+                  (state_x, state_y),
                   text_next_state,
-                  text_act, "_", action_env,
+                  text_act, "_", action,
                   ', reward:', reward.numpy()[0],
                   ', invalid actions', invalid_actions,
                   'mem size:', len(self.memory))
-            print("last output", last_output.detach().numpy()[0])
+
+            last_output_np = last_output.detach().numpy()[0]
+            last_output_np[next_invalid_actions] = 0
+            print("next output", last_output_np)
