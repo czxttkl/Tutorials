@@ -64,7 +64,7 @@ class NeuralNetwork(nn.Module):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-        print('Accuracy:', correct / total)
+        print('Accuracy ({}/{}): {}'.format(correct, total, correct / total))
 
     def accuracy_per_class(self, inputs, labels):
         inputs = self.from_data_numpy_to_tensor(inputs)
@@ -81,7 +81,7 @@ class NeuralNetwork(nn.Module):
                 class_total[label] += 1
 
         for i in range(self.nn_output_dim):
-            print('Accuracy of class {}: {}'.format(i, class_correct[i] / class_total[i]))
+            print('Accuracy of class {} ({}/{}): {}'.format(i, class_correct[i], class_total[i], class_correct[i] / class_total[i]))
 
 
 if __name__ == '__main__':
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     hidden_dim = 100
     train_size = 400
     test_size = 100
-    outpuut_dim = 2
+    output_dim = 2
 
     X_nn_train = np.random.normal(0, 5, (train_size, feature_size))
     X_nn_test = np.random.normal(0, 5, (test_size, feature_size))
@@ -99,7 +99,7 @@ if __name__ == '__main__':
     Y_nn_test = np.random.randint(0, 2, test_size)
     print(Y_nn_test)
     net = NeuralNetwork(nn_input_dim=feature_size, nn_num_hidden_layer=1,
-                        nn_hidden_dim=hidden_dim, nn_output_dim=outpuut_dim)
+                        nn_hidden_dim=hidden_dim, nn_output_dim=output_dim)
     print('number of params:', net.num_of_params())
 
     for epoch in range(epoch_num):  # loop over the dataset multiple times
@@ -117,6 +117,13 @@ if __name__ == '__main__':
         print('epoch [%d] loss: %.3f' %
               (epoch, running_loss / batch_num))
 
-    print('Finished Training')
+    print('Finished Training\n')
+    print('Training statistics')
+    print('train data size:', len(Y_nn_train))
+    net.accuracy(X_nn_train, Y_nn_train)
+    net.accuracy_per_class(X_nn_train, Y_nn_train)
+    print()
+    print('Testing statistics')
+    print('test data size:', len(Y_nn_test))
     net.accuracy(X_nn_test, Y_nn_test)
     net.accuracy_per_class(X_nn_test, Y_nn_test)

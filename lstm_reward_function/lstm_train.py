@@ -113,7 +113,7 @@ class LSTM(nn.Module):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-        print('Accuracy:', correct / total)
+        print('Accuracy ({}/{}): {}'.format(correct, total, correct / total))
 
     def accuracy_per_class(self, inputs, inputs_lens, labels):
         inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
@@ -133,7 +133,7 @@ class LSTM(nn.Module):
                 class_total[label] += 1
 
         for i in range(self.lstm_output_dim):
-            print('Accuracy of class {}: {}'.format(i, class_correct[i] / class_total[i]))
+            print('Accuracy of class {} ({}/{}): {}'.format(i, class_correct[i], class_total[i], class_correct[i] / class_total[i]))
 
 
 if __name__ == '__main__':
@@ -144,7 +144,7 @@ if __name__ == '__main__':
     hidden_dim = 100
     train_size = 400
     test_size = 100
-    outpuut_dim = 2
+    output_dim = 2
 
     X_nn_train = np.random.normal(0, 5, (train_size, max_seq_len, feature_size))
     X_nn_test = np.random.normal(0, 5, (test_size, max_seq_len, feature_size))
@@ -154,7 +154,7 @@ if __name__ == '__main__':
     Y_nn_test = np.random.randint(0, 2, test_size)
     print(X_nn_test_lens)
     net = LSTM(lstm_input_dim=feature_size, lstm_num_hidden_layer=1,
-               lstm_hidden_dim=hidden_dim, lstm_output_dim=outpuut_dim)
+               lstm_hidden_dim=hidden_dim, lstm_output_dim=output_dim)
     print('number of params:', net.num_of_params())
 
     for epoch in range(epoch_num):  # loop over the dataset multiple times
