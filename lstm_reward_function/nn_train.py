@@ -60,7 +60,7 @@ class NeuralNetwork(nn.Module):
         correct = 0
         total = 0
         with torch.no_grad():
-            outputs = net(inputs)
+            outputs = self(inputs)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
@@ -72,7 +72,7 @@ class NeuralNetwork(nn.Module):
         class_correct = list(0. for i in range(self.nn_output_dim))
         class_total = list(0. for i in range(self.nn_output_dim))
         with torch.no_grad():
-            outputs = net(inputs)
+            outputs = self(inputs)
             _, predicted = torch.max(outputs, 1)
             c = (predicted == labels).squeeze()
             for i in range(labels.size()[0]):
@@ -100,6 +100,7 @@ if __name__ == '__main__':
     print(Y_nn_test)
     net = NeuralNetwork(nn_input_dim=feature_size, nn_num_hidden_layer=1,
                         nn_hidden_dim=hidden_dim, nn_output_dim=outpuut_dim)
+    print('number of params:', net.num_of_params())
 
     for epoch in range(epoch_num):  # loop over the dataset multiple times
         running_loss = 0.0

@@ -7,28 +7,24 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torch.autograd import Variable
 
 
 class LSTM(nn.Module):
 
-    def __init__(self, lstm_input_dim, lstm_num_layer, lstm_hidden_dim, lstm_output_dim,
-                 gamma, replay_memory_size, training_batch_size):
+    def __init__(self, lstm_input_dim, lstm_num_hidden_layer, lstm_hidden_dim, lstm_output_dim):
         super(LSTM, self).__init__()
         self.lstm = nn.LSTM(input_size=lstm_input_dim,
                             hidden_size=lstm_hidden_dim,
                             batch_first=True,
-                            num_layers=lstm_num_layer)
+                            num_layers=lstm_num_hidden_layer)
         self.fc = nn.Linear(lstm_hidden_dim, lstm_output_dim)
-        self.memory = LSTM.ReplayMemory(replay_memory_size)
-
         self.lstm_input_dim = lstm_input_dim
-        self.lstm_num_layer = lstm_num_layer
+        self.lstm_num_layer = lstm_num_hidden_layer
         self.lstm_hidden_dim = lstm_hidden_dim
         self.lstm_output_dim = lstm_output_dim
-
-        self.gamma = gamma
-        self.replay_memory_size = replay_memory_size
-        self.training_batch_size = training_batch_size
+        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = optim.Adam(self.parameters())
 
     def init_hidden(self, batch_size):
         self.hidden = torch.zeros(self.lstm_num_layer, batch_size, self.lstm_hidden_dim), \
@@ -53,96 +49,139 @@ class LSTM(nn.Module):
         # the fully connected layer
         X = self.fc(X)
 
+        # 3. Keep the last output for each seq
+        # Dim transformation: (batch_size, max_seq_len, lstm_hidden_dim) -> (batch_size, lstm_hidden_dim)
+        idx = (torch.LongTensor(X_lengths) - 1) \
+            .view(-1, 1) \
+            .expand(
+            len(X_lengths),
+            X.size(2)
+        )
+        time_dimension = 1
+        idx = idx.unsqueeze(time_dimension)
+        if X.is_cuda:
+            idx = idx.cuda(X.data.get_device())
+        # Shape: (batch_size, lstm_hidden_dim)
+        X = X.gather(
+            time_dimension, Variable(idx)
+        ).squeeze(time_dimension)
+
         return X
 
     def num_of_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def select_action(self, env, step, state, last_lstm_output, invalid_actions, action_dim, eps_thres):
-        """ return action vector and action type accepted by env"""
-        sample = random.random()
-        # the first action is randomly selected
-        if step == 0:
-            action = random.randrange(4)
-            while action in invalid_actions:
-                action = random.randrange(4)
-        # greedy-epsilon
-        elif sample > eps_thres:
-            with torch.no_grad():
-                last_lstm_output[0, invalid_actions] = -999999.9
-                action = last_lstm_output.max(1)[1].detach().item()
-        else:
-            action = random.randrange(4)
-            while action in invalid_actions:
-                action = random.randrange(4)
-        return action
+    def _process_data(self, inputs, inputs_lens, labels):
+        # needs to sort input according to their lengths
+        order = np.argsort(inputs_lens)[::-1]
+        inputs = inputs[order]
+        inputs_lens = inputs_lens[order]
+        labels = labels[order]
+        inputs = self.from_data_numpy_to_tensor(inputs)
+        labels = self.from_label_numpy_to_tensor(labels)
+        return inputs, inputs_lens, labels
 
-    def optimize_model(self, env):
-        BATCH_SIZE = self.training_batch_size
+    def optimize_model(self, inputs, inputs_lens, labels):
+        inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
+        BATCH_SIZE = inputs.size()[0]
+        # refresh lstm hidden state
+        self.init_hidden(batch_size=BATCH_SIZE)
 
+        self.optimizer.zero_grad()
+        outputs = self(inputs, inputs_lens)
+        loss = self.criterion(outputs, labels)
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
+
+    def from_data_numpy_to_tensor(self, x):
+        return torch.tensor(x).float()
+
+    def from_label_numpy_to_tensor(self, y):
+        return torch.tensor(y).long()
+
+    def accuracy(self, inputs, inputs_lens, labels):
+        inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
+        BATCH_SIZE = inputs.size()[0]
+        # refresh lstm hidden state
+        self.init_hidden(batch_size=BATCH_SIZE)
+
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            outputs = self(inputs, inputs_lens)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        print('Accuracy:', correct / total)
+
+    def accuracy_per_class(self, inputs, inputs_lens, labels):
+        inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
+        BATCH_SIZE = inputs.size()[0]
         # refresh policy_net hidden state
         self.init_hidden(batch_size=BATCH_SIZE)
 
-        transitions = self.memory.sample(BATCH_SIZE)
-        transitions_len = list(map(lambda x: len(x), transitions))
-        max_seq_len = max(transitions_len)
-
-        # lstm requires transitions sorted by lens
-        dec_order_by_rand_len = np.argsort(transitions_len)[::-1]
-        transitions = [transitions[i] for i in dec_order_by_rand_len]
-        transitions_len = [transitions_len[i] for i in dec_order_by_rand_len]
-
-        i = 0
-        action_vecs = torch.zeros([BATCH_SIZE, max_seq_len, self.lstm_input_dim], dtype=torch.float)
-        action_indexs = torch.zeros([BATCH_SIZE, max_seq_len, 1], dtype=torch.long)
-        last_rewards = torch.zeros([BATCH_SIZE, max_seq_len], dtype=torch.float)
-        non_final_masks = torch.zeros([BATCH_SIZE, max_seq_len - 1], dtype=torch.float)
-        valid_masks = torch.zeros([BATCH_SIZE, max_seq_len - 1], dtype=torch.float)
-        valid_action_masks = torch.ones([BATCH_SIZE, max_seq_len, self.lstm_output_dim])
-
-        for tran_len, transition in zip(transitions_len, transitions):
-            transition_actions = list(map(lambda x: env.action_to_action_vec_lstm(x.action), transition))
-            transition_actions = torch.cat(transition_actions).squeeze(1)
-            action_vecs[i, :tran_len, :] = transition_actions
-            transition_action_indexs = list(map(lambda x: torch.tensor([[x.action]]), transition))
-            action_indexs[i, :tran_len, :] = torch.cat(transition_action_indexs)
-            transition_rewards = torch.tensor(list(map(lambda x: x.reward, transition)))
-            last_rewards[i, :tran_len] = transition_rewards
-            non_final_masks[i, :tran_len - 2] = 1
-            valid_masks[i, :tran_len - 1] = 1
-            for j, t in enumerate(transition[1:]):
-                valid_action_masks[i, j, t.invalid_actions] = 0
-            i += 1
-
-        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the columns of actions taken
-        # shape: (batch_size, max_seq_len, lstm_output_dim)
-        state_action_values_full = self(action_vecs, transitions_len)
-        # shape: (batch_size, max_seq_len - 1, lstm_output_dim)
-        cur_state_action_values_full = state_action_values_full[:, :-1, :]
-        # shape: (batch_size, max_seq_len - 1)
-        cur_state_action_values = cur_state_action_values_full.gather(2, action_indexs[:, 1:, :]).squeeze(2)
-        # shape: (batch_size, max_seq_len - 1)
-        cur_state_action_values *= valid_masks
-
-        # Compute Q(s_{t+1}, a_{t+1}) for all a_{t+1}.
+        class_correct = list(0. for i in range(self.lstm_output_dim))
+        class_total = list(0. for i in range(self.lstm_output_dim))
         with torch.no_grad():
-            # shape: (batch_size, max_seq_len - 1, lstm_output_dim)
-            next_state_action_values_full = state_action_values_full[:, 1:, :].detach()
-            # shape: (batch_size, max_seq_len - 1, lstm_output_dim)
-            next_state_action_values_full *= valid_action_masks[:, 1:, :]
-            # shape: (batch_size, max_seq_len - 1)
-            next_state_max_action_values = next_state_action_values_full.max(2)[0]
-            next_state_max_action_values *= non_final_masks
-            expected_state_action_values = (next_state_max_action_values * self.gamma) + last_rewards[:, 1:]
-            expected_state_action_values *= valid_masks
+            outputs = self(inputs, inputs_lens)
+            _, predicted = torch.max(outputs, 1)
+            c = (predicted == labels).squeeze()
+            for i in range(labels.size()[0]):
+                label = labels[i]
+                class_correct[label] += c[i].item()
+                class_total[label] += 1
 
-        # Compute Huber loss
-        loss = F.smooth_l1_loss(cur_state_action_values, expected_state_action_values.detach())
-        print('loss:', loss.item())
+        for i in range(self.lstm_output_dim):
+            print('Accuracy of class {}: {}'.format(i, class_correct[i] / class_total[i]))
 
-        # Optimize the model
-        self.optimizer.zero_grad()
-        loss.backward()
-        for param in self.parameters():
-            param.grad.data.clamp_(-1, 1)
-        self.optimizer.step()
+
+if __name__ == '__main__':
+    batch_size = 8
+    epoch_num = 5
+    max_seq_len = 7
+    feature_size = 1379
+    hidden_dim = 100
+    train_size = 400
+    test_size = 100
+    outpuut_dim = 2
+
+    X_nn_train = np.random.normal(0, 5, (train_size, max_seq_len, feature_size))
+    X_nn_test = np.random.normal(0, 5, (test_size, max_seq_len, feature_size))
+    X_nn_train_lens = np.random.randint(1, max_seq_len + 1, train_size)
+    X_nn_test_lens = np.random.randint(1, max_seq_len + 1, test_size)
+    Y_nn_train = np.random.randint(0, 2, train_size)
+    Y_nn_test = np.random.randint(0, 2, test_size)
+    print(X_nn_test_lens)
+    net = LSTM(lstm_input_dim=feature_size, lstm_num_hidden_layer=1,
+               lstm_hidden_dim=hidden_dim, lstm_output_dim=outpuut_dim)
+    print('number of params:', net.num_of_params())
+
+    for epoch in range(epoch_num):  # loop over the dataset multiple times
+        running_loss = 0.0
+        batch_num = 0
+        batch_start = 0
+        batch_end = batch_start + batch_size
+        while batch_start < X_nn_train.shape[0]:
+            inputs, inputs_lens, labels = \
+                X_nn_train[batch_start:batch_end], \
+                X_nn_train_lens[batch_start:batch_end], \
+                Y_nn_train[batch_start:batch_end]
+            loss = net.optimize_model(inputs, inputs_lens, labels)
+            batch_start += batch_size
+            batch_end += batch_size
+            running_loss += loss
+            batch_num += 1
+        print('epoch [%d] loss: %.3f' %
+              (epoch, running_loss / batch_num))
+
+    print('Finished Training\n')
+    print('Training statistics')
+    print('train data size:', len(Y_nn_train))
+    net.accuracy(X_nn_train, X_nn_train_lens, Y_nn_train)
+    net.accuracy_per_class(X_nn_train, X_nn_train_lens, Y_nn_train)
+    print()
+    print('Testing statistics')
+    print('test data size:', len(Y_nn_test))
+    net.accuracy(X_nn_test, X_nn_test_lens, Y_nn_test)
+    net.accuracy_per_class(X_nn_test, X_nn_test_lens, Y_nn_test)
