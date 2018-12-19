@@ -64,7 +64,11 @@ class NeuralNetwork(nn.Module):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-        print('Accuracy ({}/{}): {}'.format(correct, total, correct / total))
+        if total == 0:
+            acc = 0
+        else:
+            acc = correct / total
+        print('Accuracy ({}/{}): {}'.format(correct, total, acc))
 
     def accuracy_per_class(self, inputs, labels):
         inputs = self.from_data_numpy_to_tensor(inputs)
@@ -74,14 +78,18 @@ class NeuralNetwork(nn.Module):
         with torch.no_grad():
             outputs = self(inputs)
             _, predicted = torch.max(outputs, 1)
-            c = (predicted == labels).squeeze()
+            c = (predicted == labels)
             for i in range(labels.size()[0]):
                 label = labels[i]
                 class_correct[label] += c[i].item()
                 class_total[label] += 1
 
         for i in range(self.nn_output_dim):
-            print('Accuracy of class {} ({}/{}): {}'.format(i, class_correct[i], class_total[i], class_correct[i] / class_total[i]))
+            if class_total[i] == 0:
+                acc = 0
+            else:
+                acc = class_correct[i] / class_total[i]
+            print('Accuracy of class {} ({}/{}): {}'.format(i, class_correct[i], class_total[i], acc))
 
 
 if __name__ == '__main__':
