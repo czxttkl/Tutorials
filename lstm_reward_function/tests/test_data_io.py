@@ -3,7 +3,7 @@ import numpy as np
 import sys, os
 myPath = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, myPath + '/../')
-from data_io.helper import generate_raw_data
+from data_io.helper import generate_raw_data, generate_nn_data
 
 
 def test_data_io():
@@ -64,6 +64,9 @@ def test_data_io():
 
     assert np.array_equal(Y['123'], [1, 0, 1])
     assert np.array_equal(Y['234'], [1, 0])
+
+    X_nn_train, X_nn_test, Y_nn_train, Y_nn_test = \
+        generate_nn_data(X_state, X_reward, X_action, X_time_diff, Y, data_users)
 
 
 if __name__ == '__main__':

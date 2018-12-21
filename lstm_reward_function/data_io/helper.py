@@ -1,6 +1,7 @@
 from collections import defaultdict
 import numpy as np
 import random
+from scipy import stats
 
 
 def generate_raw_data(presto_data, feature_index, action_index, reward_metric, earliest_seq_num):
@@ -44,3 +45,53 @@ def generate_raw_data(presto_data, feature_index, action_index, reward_metric, e
     random.shuffle(data_users)
 #     print(data_users)
     return X_state, X_reward, X_action, X_time_diff, Y, data_users
+
+
+def generate_nn_data(X_state, X_reward, X_action, X_time_diff, Y, data_users):
+    X_nn_train = [np.hstack((
+                    X_time_diff[mdp_id][-1],
+                    X_action[mdp_id][-1],
+                    X_state[mdp_id][-1],
+                  ))
+                  for mdp_id in data_users[len(data_users)//5:]]
+
+    X_nn_test = [np.hstack((
+                    X_time_diff[mdp_id][-1],
+                    X_action[mdp_id][-1],
+                    X_state[mdp_id][-1],
+                  ))
+                  for mdp_id in data_users[:len(data_users)//5]]
+
+    Y_nn_train = [Y[mdp_id][-1] for mdp_id in data_users[len(data_users)//5:]]
+
+    Y_nn_test = [Y[mdp_id][-1] for mdp_id in data_users[:len(data_users)//5]]
+
+    X_nn_train = np.array(X_nn_train)
+    X_nn_test = np.array(X_nn_test)
+    Y_nn_train = np.array(Y_nn_train)
+    Y_nn_test = np.array(Y_nn_test)
+
+    print('\nbefore normalization')
+    print(stats.describe(X_nn_train))
+    print("X_nn_train (shape: {})".format(X_nn_train.shape))
+    print(X_nn_train)
+    print("\nX_nn_test (shape: {})".format(X_nn_test.shape))
+    print(X_nn_test)
+    print("\nY_nn_train (shape: {})".format(Y_nn_train.shape))
+    print(Y_nn_train)
+    print("\nY_nn_test (shape: {})".format(Y_nn_test.shape))
+    print(Y_nn_test)
+
+    print('\nafter normalization')
+    X_nn_mean = np.mean(np.abs(X_nn_train), axis=0)
+    for i, v in enumerate(X_nn_mean):
+        if v != 0:
+            X_nn_train[:, i] = X_nn_train[:, i] / v
+            X_nn_test[:, i] = X_nn_test[:, i] / v
+    print(stats.describe(X_nn_train))
+    print("X_nn_train (shape: {})".format(X_nn_train.shape))
+    print(X_nn_train)
+    print("\nX_nn_test (shape: {})".format(X_nn_test.shape))
+    print(X_nn_test)
+
+    return X_nn_train, X_nn_test, Y_nn_train, Y_nn_test
