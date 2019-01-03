@@ -1,10 +1,20 @@
+# this script can only be run on Python 3.6
 from typing import TypeVar, List, Dict, Generic, NamedTuple
 
 FEATURES = Dict[int, float]
 ACTION = TypeVar("ACTION", str, FEATURES)
 
 
-class Samples(NamedTuple, Generic[ACTION]):
+M_A = type(NamedTuple)
+M_B = type(Generic[ACTION])
+print(type(NamedTuple))
+print(type(Generic[ACTION]))
+print(M_A)
+print(M_B)
+class M_C(M_A, M_B): pass
+
+
+class Samples(NamedTuple, Generic[ACTION], metaclass=M_C):
     mdp_ids: List[str]
     states: List[FEATURES]
     actions: List[ACTION]
@@ -21,7 +31,7 @@ class MultiStepSamplesInheritance(Samples):
     next_actions: List[List[ACTION]]
 
 
-class MultiStepSamples(NamedTuple, Generic[ACTION], Samples):
+class MultiStepSamples(NamedTuple, Generic[ACTION], Samples, metaclass=M_C):
     mdp_ids: List[str]
     states: List[FEATURES]
     actions: List[ACTION]
