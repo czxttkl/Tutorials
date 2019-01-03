@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 class NeuralNetwork(nn.Module):
 
-    def __init__(self, nn_input_dim, nn_num_hidden_layer, nn_hidden_dim, nn_output_dim):
+    def __init__(self, nn_input_dim, nn_num_hidden_layer, nn_hidden_dim, nn_output_dim, regress=False):
         super(NeuralNetwork, self).__init__()
         h_sizes = [nn_input_dim] + [nn_hidden_dim] * nn_num_hidden_layer + [nn_output_dim]
         self.hidden = nn.ModuleList()
@@ -21,8 +21,12 @@ class NeuralNetwork(nn.Module):
         self.nn_num_layer = nn_num_hidden_layer
         self.nn_hidden_dim = nn_hidden_dim
         self.nn_output_dim = nn_output_dim
-        self.criterion = nn.CrossEntropyLoss()
+        self.regress = regress
         self.optimizer = optim.Adam(self.parameters())
+        if self.regress:
+            self.criterion = nn.MSELoss()
+        else:
+            self.criterion = nn.CrossEntropyLoss()
 
     def forward(self, x):
         for i in range(self.nn_num_layer + 1):
