@@ -161,7 +161,7 @@ class LSTM(nn.Module):
             _, predicted = torch.max(outputs, 1)
             c = (predicted == labels)
             for i in range(BATCH_SIZE):
-                label = labels[i].long()
+                label = labels[i].long().item()
                 label_index = np.where(distinct_labels == label)[0][0]
                 class_correct[label_index] += c[i].item()
                 class_total[label_index] += 1
@@ -190,7 +190,7 @@ class LSTM(nn.Module):
             outputs = self(inputs, inputs_lens)
             m = (outputs - labels) ** 2
             for i in range(BATCH_SIZE):
-                label = labels[i].long()
+                label = labels[i].long().item()
                 label_index = np.where(distinct_labels == label)[0][0]
                 class_mse[label_index] += m[i].item()
                 class_total[label_index] += 1

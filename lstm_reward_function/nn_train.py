@@ -107,7 +107,7 @@ class NeuralNetwork(nn.Module):
             _, predicted = torch.max(outputs, 1)
             c = (predicted == labels)
             for i in range(labels.size()[0]):
-                label = labels[i]
+                label = labels[i].item()
                 class_correct[label] += c[i].item()
                 class_total[label] += 1
 
@@ -133,7 +133,7 @@ class NeuralNetwork(nn.Module):
             outputs = self(inputs)
             m = (outputs - labels) ** 2
             for i in range(labels.size()[0]):
-                label = labels[i].long()
+                label = labels[i].long().item()
                 label_index = np.where(distinct_labels == label)[0][0]
                 class_mse[label_index] += m[i].item()
                 class_total[label_index] += 1
