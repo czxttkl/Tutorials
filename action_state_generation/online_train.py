@@ -4,6 +4,8 @@ from itertools import count
 
 import torch
 import torch.optim as optim
+import pandas as pd
+from plot_helper import plot_seaborn
 
 from model.lstm import LSTM
 from model.dqn import DQN
@@ -180,7 +182,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
 
 def train_main(model_str, env_str, train_times, batch_size, gamma,
                test_every_episode, eps_thres, replay_memory_size,
-               num_episodes, learning_start_episodes, verbose):
+               num_episodes, learning_start_episodes, verbose, plot):
     test_durations = []
     test_rewards = []
     for i in range(train_times):
@@ -208,9 +210,24 @@ def train_main(model_str, env_str, train_times, batch_size, gamma,
     for i, (ave, std) in enumerate(zip(test_rewards_ave, test_rewards_std)):
         print("Episode {}: {:.2f} +- {:.2f}".format(i * test_every_episode, ave, std))
 
+    if plot:
+        reward_df = pd.DataFrame(
+            {
+                'reward': np.hstack(test_rewards),
+                'epoch': np.tile(
+                    np.arange(len(test_rewards_ave)) * test_every_episode,
+                    len(test_rewards)
+                )
+            }
+        )
+        plot_seaborn(reward_df, xaxis='epoch', yaxis='reward',
+                     title='reward_plot_{}_{}'.format(model_str, env_str),
+                     file='reward_plot_{}_{}.png'.format(model_str, env_str),
+                     show=False)
+
 
 if __name__ == '__main__':
-    TRAIN_TIMES = 1
+    TRAIN_TIMES = 3
     BATCH_SIZE = 4
     GAMMA = 0.9
     TEST_EVERY_EPISODE = 10
@@ -219,6 +236,7 @@ if __name__ == '__main__':
     NUM_EPISODES = 3001
     LEARNING_START_EPISODES = 500
     VERBOSE = False
+    PLOT = True
 
     model_str = 'lstm'
     # model_str = 'dqn'
@@ -237,6 +255,7 @@ if __name__ == '__main__':
         NUM_EPISODES,
         LEARNING_START_EPISODES,
         VERBOSE,
+        PLOT,
     )
 
 
