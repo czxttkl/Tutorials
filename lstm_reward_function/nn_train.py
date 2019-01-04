@@ -148,6 +148,28 @@ class NeuralNetwork(nn.Module):
                   .format(i, distinct_labels[i], class_mse_temp, class_total[i], class_mse[i]))
         return class_mse
 
+    @staticmethod
+    def train_loop(net, epoch_num, batch_size, X_nn_train, Y_nn_train):
+        ave_loss = 999
+        for epoch in range(epoch_num):  # loop over the dataset multiple times
+            running_loss = 0.0
+            batch_num = 0
+            batch_start = 0
+            batch_end = batch_start + batch_size
+            while batch_start < X_nn_train.shape[0]:
+                inputs, labels = X_nn_train[batch_start:batch_end], Y_nn_train[batch_start:batch_end]
+                loss = net.optimize_model(inputs, labels)
+                batch_start += batch_size
+                batch_end += batch_size
+                running_loss += loss
+                batch_num += 1
+            print('epoch [%d] loss: %.3f' %
+                  (epoch, running_loss / batch_num))
+            ave_loss = running_loss / batch_num
+
+        print('Finished Training\n')
+        return ave_loss
+
 
 if __name__ == '__main__':
     #############################################################
@@ -173,23 +195,8 @@ if __name__ == '__main__':
         regress=False,
     )
     print('number of params:', net.num_of_params())
+    NeuralNetwork.train_loop(net, epoch_num, batch_size, X_nn_train, Y_nn_train)
 
-    for epoch in range(epoch_num):  # loop over the dataset multiple times
-        running_loss = 0.0
-        batch_num = 0
-        batch_start = 0
-        batch_end = batch_start + batch_size
-        while batch_start < X_nn_train.shape[0]:
-            inputs, labels = X_nn_train[batch_start:batch_end], Y_nn_train[batch_start:batch_end]
-            loss = net.optimize_model(inputs, labels)
-            batch_start += batch_size
-            batch_end += batch_size
-            running_loss += loss
-            batch_num += 1
-        print('epoch [%d] loss: %.3f' %
-              (epoch, running_loss / batch_num))
-
-    print('Finished Training\n')
     print('Training statistics')
     print('train data size:', len(Y_nn_train))
     net.accuracy(X_nn_train, Y_nn_train)
@@ -224,23 +231,8 @@ if __name__ == '__main__':
         regress=True,
     )
     print('number of params:', net.num_of_params())
+    NeuralNetwork.train_loop(net, epoch_num, batch_size, X_nn_train, Y_nn_train)
 
-    for epoch in range(epoch_num):  # loop over the dataset multiple times
-        running_loss = 0.0
-        batch_num = 0
-        batch_start = 0
-        batch_end = batch_start + batch_size
-        while batch_start < X_nn_train.shape[0]:
-            inputs, labels = X_nn_train[batch_start:batch_end], Y_nn_train[batch_start:batch_end]
-            loss = net.optimize_model(inputs, labels)
-            batch_start += batch_size
-            batch_end += batch_size
-            running_loss += loss
-            batch_num += 1
-        print('epoch [%d] loss: %.3f' %
-              (epoch, running_loss / batch_num))
-
-    print('Finished Training\n')
     print('Training statistics')
     print('train data size:', len(Y_nn_train))
     net.mse(X_nn_train, Y_nn_train)

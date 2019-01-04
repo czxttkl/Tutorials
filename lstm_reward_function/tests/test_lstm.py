@@ -29,26 +29,8 @@ def test_lstm_classify():
         regress=False,
     )
     print('number of params:', net.num_of_params())
+    LSTM.train_loop(net, epoch_num, batch_size, X_nn_train, X_nn_train_lens, Y_nn_train)
 
-    for epoch in range(epoch_num):  # loop over the dataset multiple times
-        running_loss = 0.0
-        batch_num = 0
-        batch_start = 0
-        batch_end = batch_start + batch_size
-        while batch_start < X_nn_train.shape[0]:
-            inputs, inputs_lens, labels = \
-                X_nn_train[batch_start:batch_end], \
-                X_nn_train_lens[batch_start:batch_end], \
-                Y_nn_train[batch_start:batch_end]
-            loss = net.optimize_model(inputs, inputs_lens, labels)
-            batch_start += batch_size
-            batch_end += batch_size
-            running_loss += loss
-            batch_num += 1
-        print('epoch [%d] loss: %.3f' %
-              (epoch, running_loss / batch_num))
-
-    print('Finished Training\n')
     print('Training statistics')
     print('train data size:', len(Y_nn_train))
     acc_train = net.accuracy(X_nn_train, X_nn_train_lens, Y_nn_train)
@@ -95,26 +77,8 @@ def test_lstm_regress():
         regress=True,
     )
     print('number of params:', net.num_of_params())
+    LSTM.train_loop(net, epoch_num, batch_size, X_nn_train, X_nn_train_lens, Y_nn_train)
 
-    for epoch in range(epoch_num):  # loop over the dataset multiple times
-        running_loss = 0.0
-        batch_num = 0
-        batch_start = 0
-        batch_end = batch_start + batch_size
-        while batch_start < X_nn_train.shape[0]:
-            inputs, inputs_lens, labels = \
-                X_nn_train[batch_start:batch_end], \
-                X_nn_train_lens[batch_start:batch_end], \
-                Y_nn_train[batch_start:batch_end]
-            loss = net.optimize_model(inputs, inputs_lens, labels)
-            batch_start += batch_size
-            batch_end += batch_size
-            running_loss += loss
-            batch_num += 1
-        print('epoch [%d] loss: %.3f' %
-              (epoch, running_loss / batch_num))
-
-    print('Finished Training\n')
     print('Training statistics')
     print('train data size:', len(Y_nn_train))
     mse_train = net.mse(X_nn_train, X_nn_train_lens, Y_nn_train)
