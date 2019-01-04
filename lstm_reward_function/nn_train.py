@@ -75,6 +75,7 @@ class NeuralNetwork(nn.Module):
         else:
             acc = correct / total
         print('Accuracy ({}/{}): {}'.format(correct, total, acc))
+        return acc
 
     def mse(self, inputs, labels):
         assert self.regress
@@ -90,15 +91,17 @@ class NeuralNetwork(nn.Module):
         else:
             m_ave = m / total
         print('MSE ({}/{}): {}'.format(m, total, m_ave))
+        return m_ave
 
     def accuracy_per_class(self, inputs, labels):
-        inputs = self.from_data_numpy_to_tensor(inputs)
-        labels = self.from_label_numpy_to_tensor(labels)
         distinct_labels = np.unique(labels)
         distinct_labels_num = len(distinct_labels)
+        inputs = self.from_data_numpy_to_tensor(inputs)
+        labels = self.from_label_numpy_to_tensor(labels)
 
         class_correct = list(0. for i in range(self.nn_output_dim))
         class_total = list(0. for i in range(self.nn_output_dim))
+        class_acc = list(0. for i in range(self.nn_output_dim))
         with torch.no_grad():
             outputs = self(inputs)
             _, predicted = torch.max(outputs, 1)
@@ -110,17 +113,19 @@ class NeuralNetwork(nn.Module):
 
         for i in range(distinct_labels_num):
             if class_total[i] == 0:
-                acc = 0
+                class_acc[i] = 0
             else:
-                acc = class_correct[i] / class_total[i]
-            print('Accuracy of class {} (label={}) ({}/{}): {}'.format(i, distinct_labels[i], class_correct[i], class_total[i], acc))
+                class_acc[i] = class_correct[i] / class_total[i]
+            print('Accuracy of class {} (label={}) ({}/{}): {}'
+                  .format(i, distinct_labels[i], class_correct[i], class_total[i], class_acc[i]))
+        return class_acc
 
     def mse_per_class(self, inputs, labels):
         assert self.regress
-        inputs = self.from_data_numpy_to_tensor(inputs)
-        labels = self.from_label_numpy_to_tensor(labels)
         distinct_labels = np.unique(labels)
         distinct_labels_num = len(distinct_labels)
+        inputs = self.from_data_numpy_to_tensor(inputs)
+        labels = self.from_label_numpy_to_tensor(labels)
 
         class_mse = list(0. for i in range(distinct_labels_num))
         class_total = list(0. for i in range(distinct_labels_num))
@@ -134,11 +139,14 @@ class NeuralNetwork(nn.Module):
                 class_total[label_index] += 1
 
         for i in range(distinct_labels_num):
+            class_mse_temp = class_mse[i]
             if class_total[i] == 0:
-                mse = 999
+                class_mse[i] = 999
             else:
-                mse = class_mse[i] / class_total[i]
-            print('MSE of class {} (label={}) ({}/{}): {}'.format(i, distinct_labels[i], class_mse[i], class_total[i], mse))
+                class_mse[i] /= class_total[i]
+            print('MSE of class {} (label={}) ({}/{}): {}'
+                  .format(i, distinct_labels[i], class_mse_temp, class_total[i], class_mse[i]))
+        return class_mse
 
 
 if __name__ == '__main__':

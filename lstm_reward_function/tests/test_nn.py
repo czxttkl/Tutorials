@@ -45,13 +45,19 @@ def test_nn_classify():
     print('Finished Training\n')
     print('Training statistics')
     print('train data size:', len(Y_nn_train))
-    net.accuracy(X_nn_train, Y_nn_train)
-    net.accuracy_per_class(X_nn_train, Y_nn_train)
+    acc_train = net.accuracy(X_nn_train, Y_nn_train)
+    class_acc_train = net.accuracy_per_class(X_nn_train, Y_nn_train)
+    assert acc_train > 0.9
+    for cat in class_acc_train:
+        assert cat > 0.9
     print()
     print('Testing statistics')
     print('test data size:', len(Y_nn_test))
-    net.accuracy(X_nn_test, Y_nn_test)
-    net.accuracy_per_class(X_nn_test, Y_nn_test)
+    acc_test = net.accuracy(X_nn_test, Y_nn_test)
+    class_acc_test = net.accuracy_per_class(X_nn_test, Y_nn_test)
+    assert acc_test < 0.7
+    for cat in class_acc_test:
+        assert cat < 0.7
     print()
 
 
@@ -95,10 +101,21 @@ def test_nn_regress():
     print('Finished Training\n')
     print('Training statistics')
     print('train data size:', len(Y_nn_train))
-    net.mse(X_nn_train, Y_nn_train)
-    net.mse_per_class(X_nn_train, Y_nn_train)
+    mse_train = net.mse(X_nn_train, Y_nn_train)
+    class_mse_train = net.mse_per_class(X_nn_train, Y_nn_train)
+    assert mse_train < 0.3
+    for cmt in class_mse_train:
+        assert cmt < 0.3
     print()
     print('Testing statistics')
     print('test data size:', len(Y_nn_test))
-    net.mse(X_nn_test, Y_nn_test)
-    net.mse_per_class(X_nn_test, Y_nn_test)
+    mse_test = net.mse(X_nn_test, Y_nn_test)
+    class_mse_test = net.mse_per_class(X_nn_test, Y_nn_test)
+    assert mse_test > 20
+    for cmt in class_mse_test:
+        assert cmt > 20
+
+
+if __name__ == '__main__':
+    test_nn_classify()
+    test_nn_regress()

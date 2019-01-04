@@ -123,6 +123,7 @@ class LSTM(nn.Module):
         else:
             acc = correct / total
         print('Accuracy ({}/{}): {}'.format(correct, total, acc))
+        return acc
 
     def mse(self, inputs, inputs_lens, labels):
         assert self.regress
@@ -141,18 +142,20 @@ class LSTM(nn.Module):
         else:
             m_ave = m / total
         print('MSE ({}/{}): {}'.format(m, total, m_ave))
+        return m_ave
 
     def accuracy_per_class(self, inputs, inputs_lens, labels):
         assert not self.regress
-        inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
         distinct_labels = np.unique(labels)
         distinct_labels_num = len(distinct_labels)
+        inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
         BATCH_SIZE = inputs.size()[0]
         # refresh policy_net hidden state
         self.init_hidden(batch_size=BATCH_SIZE)
 
         class_correct = list(0. for i in range(self.lstm_output_dim))
         class_total = list(0. for i in range(self.lstm_output_dim))
+        class_acc = list(0. for i in range(self.lstm_output_dim))
         with torch.no_grad():
             outputs = self(inputs, inputs_lens)
             _, predicted = torch.max(outputs, 1)
@@ -165,16 +168,18 @@ class LSTM(nn.Module):
 
         for i in range(distinct_labels_num):
             if class_total[i] == 0:
-                acc = 0
+                class_acc[i] = 0
             else:
-                acc = class_correct[i] / class_total[i]
-            print('Accuracy of class {} (label={}) ({}/{}): {}'.format(i, distinct_labels[i], class_correct[i], class_total[i], acc))
+                class_acc[i] = class_correct[i] / class_total[i]
+            print('Accuracy of class {} (label={}) ({}/{}): {}'
+                  .format(i, distinct_labels[i], class_correct[i], class_total[i], class_acc[i]))
+        return class_acc
 
     def mse_per_class(self, inputs, inputs_lens, labels):
         assert self.regress
-        inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
         distinct_labels = np.unique(labels)
         distinct_labels_num = len(distinct_labels)
+        inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
         BATCH_SIZE = inputs.size()[0]
         # refresh policy_net hidden state
         self.init_hidden(batch_size=BATCH_SIZE)
@@ -191,11 +196,14 @@ class LSTM(nn.Module):
                 class_total[label_index] += 1
 
         for i in range(distinct_labels_num):
+            class_mse_temp = class_mse[i]
             if class_total[i] == 0:
-                mse = 999
+                class_mse[i] = 999
             else:
-                mse = class_mse[i] / class_total[i]
-            print('MSE of class {} (label={}) ({}/{}): {}'.format(i, distinct_labels[i], class_mse[i], class_total[i], mse))
+                class_mse[i] /= class_total[i]
+            print('MSE of class {} (label={}) ({}/{}): {}'
+                  .format(i, distinct_labels[i], class_mse_temp, class_total[i], class_mse[i]))
+        return class_mse
 
 
 if __name__ == '__main__':
