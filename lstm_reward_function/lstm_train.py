@@ -102,9 +102,9 @@ class LSTM(nn.Module):
 
     def from_label_numpy_to_tensor(self, y):
         if self.regress:
-            return torch.tensor(y).unsqueeze(1).float()
+            return torch.tensor(y.tolist()).unsqueeze(1).float()
         else:
-            return torch.tensor(y).long()
+            return torch.tensor(y.tolist()).long()
 
     def accuracy(self, inputs, inputs_lens, labels):
         assert not self.regress
@@ -145,6 +145,8 @@ class LSTM(nn.Module):
     def accuracy_per_class(self, inputs, inputs_lens, labels):
         assert not self.regress
         inputs, inputs_lens, labels = self._process_data(inputs, inputs_lens, labels)
+        distinct_labels = np.unique(labels)
+        distinct_labels_num = len(distinct_labels)
         BATCH_SIZE = inputs.size()[0]
         # refresh policy_net hidden state
         self.init_hidden(batch_size=BATCH_SIZE)
@@ -156,16 +158,17 @@ class LSTM(nn.Module):
             _, predicted = torch.max(outputs, 1)
             c = (predicted == labels)
             for i in range(BATCH_SIZE):
-                label = labels[i]
-                class_correct[label] += c[i].item()
-                class_total[label] += 1
+                label = labels[i].long()
+                label_index = np.where(distinct_labels == label)[0][0]
+                class_correct[label_index] += c[i].item()
+                class_total[label_index] += 1
 
-        for i in range(self.lstm_output_dim):
+        for i in range(distinct_labels_num):
             if class_total[i] == 0:
                 acc = 0
             else:
                 acc = class_correct[i] / class_total[i]
-            print('Accuracy of class {} ({}/{}): {}'.format(i, class_correct[i], class_total[i], acc))
+            print('Accuracy of class {} (label={}) ({}/{}): {}'.format(i, distinct_labels[i], class_correct[i], class_total[i], acc))
 
     def mse_per_class(self, inputs, inputs_lens, labels):
         assert self.regress
@@ -196,6 +199,9 @@ class LSTM(nn.Module):
 
 
 if __name__ == '__main__':
+    #############################################################
+    #                      Classification                       #
+    #############################################################
     batch_size = 8
     epoch_num = 5
     max_seq_len = 7
@@ -250,6 +256,9 @@ if __name__ == '__main__':
     net.accuracy_per_class(X_nn_test, X_nn_test_lens, Y_nn_test)
     print()
 
+    #############################################################
+    #                       Regression                          #
+    #############################################################
     batch_size = 8
     epoch_num = 5
     max_seq_len = 7
