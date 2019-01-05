@@ -61,6 +61,10 @@ class GridWorldEnv:
         # exclude the last dim of the state, which records # of back-steps
         self.state_dim = self.grid.shape[0] * self.grid.shape[1]
 
+    def test_step_limit(self):
+        """ test step limit. If test steps beyond this limit, terminate the episode """
+        return 30
+
     def cur(self):
         x, y = self.agent_pos
         return x, y, self.back_step
@@ -144,3 +148,29 @@ class GridWorldEnv:
         x, y, bs = state
         invalid_actions = self.invalid_actions_by_x_y_backstep(x, y, bs)
         return invalid_actions
+
+    def print_memory(self, net, i_episode, state, action, invalid_actions,
+                     next_state, reward, last_output, next_invalid_actions,
+                     verbose):
+        state_x, state_y = self.state_to_x_y(state)
+        text_act = ['L', 'R', 'U', 'D'][action]
+        if next_state is None:
+            text_next_state = '     G,  '
+        else:
+            next_state_x, next_state_y = self.state_to_x_y(next_state)
+            text_next_state = (next_state_x, next_state_y), ", "
+        # print if verbose=True or verbose=False && terminal state or verbose=False && test
+        if verbose or next_state is None or i_episode == 'test':
+            print('episode',
+                  i_episode,
+                  'push to mem:',
+                  (state_x, state_y),
+                  text_next_state,
+                  text_act, "_", action,
+                  ', reward:', reward.numpy()[0],
+                  ', invalid actions', invalid_actions,
+                  'mem size:', len(net.memory))
+
+            last_output_np = last_output.detach().numpy()[0]
+            last_output_np[next_invalid_actions] = 0
+            print("next output", last_output_np)

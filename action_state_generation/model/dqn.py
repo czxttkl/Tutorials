@@ -25,6 +25,8 @@ class DQN(nn.Module):
                     self.memory.append(None)
                 self.memory[self.position] = transition
                 self.position = (self.position + 1) % self.capacity
+            print("push an episode of {} transitions, mem size {}\n"
+                  .format(len(transitions), len(self.memory)))
 
         def sample(self, batch_size):
             # sample with replacement
@@ -70,9 +72,9 @@ class DQN(nn.Module):
         sample = random.random()
         # the first action is randomly selected
         if step == 0:
-            action = random.randrange(4)
+            action = random.randrange(action_dim)
             while action in invalid_actions:
-                action = random.randrange(4)
+                action = random.randrange(action_dim)
         # greedy-epsilon
         elif sample > eps_thres:
             with torch.no_grad():
@@ -81,9 +83,9 @@ class DQN(nn.Module):
                 action_output[0, invalid_actions] = -999999.9
                 action = action_output.max(1)[1].detach().item()
         else:
-            action = random.randrange(4)
+            action = random.randrange(action_dim)
             while action in invalid_actions:
-                action = random.randrange(4)
+                action = random.randrange(action_dim)
         return action
 
     def optimize_model(self, env):
@@ -135,28 +137,3 @@ class DQN(nn.Module):
         next_state_vec = env.state_to_state_vec_dqn(next_state)
         return self(next_state_vec)
 
-    def print_memory(self, env, i_episode, state, action, invalid_actions,
-                     next_state, reward, last_output, next_invalid_actions,
-                     verbose):
-        state_x, state_y = env.state_to_x_y(state)
-        text_act = ['L', 'R', 'U', 'D'][action]
-        if next_state is None:
-            text_next_state = '     G,  '
-        else:
-            next_state_x, next_state_y = env.state_to_x_y(next_state)
-            text_next_state = (next_state_x, next_state_y), ", "
-        # print if verbose=True or verbose=False && terminal state or verbose=False && test
-        if verbose or next_state is None or i_episode == 'test':
-            print('episode',
-                  i_episode,
-                  'push to mem:',
-                  (state_x, state_y),
-                  text_next_state,
-                  text_act, "_", action,
-                  ', reward:', reward.numpy()[0],
-                  ', invalid actions', invalid_actions,
-                  'mem size:', len(self.memory))
-
-            last_output_np = last_output.detach().numpy()[0]
-            last_output_np[next_invalid_actions] = 0
-            print("next output", last_output_np)

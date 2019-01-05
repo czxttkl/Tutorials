@@ -89,18 +89,18 @@ class LSTM(nn.Module):
         sample = random.random()
         # the first action is randomly selected
         if step == 0:
-            action = random.randrange(4)
+            action = random.randrange(action_dim)
             while action in invalid_actions:
-                action = random.randrange(4)
+                action = random.randrange(action_dim)
         # greedy-epsilon
         elif sample > eps_thres:
             with torch.no_grad():
                 last_lstm_output[0, invalid_actions] = -999999.9
                 action = last_lstm_output.max(1)[1].detach().item()
         else:
-            action = random.randrange(4)
+            action = random.randrange(action_dim)
             while action in invalid_actions:
-                action = random.randrange(4)
+                action = random.randrange(action_dim)
         return action
 
     def optimize_model(self, env):
@@ -178,28 +178,3 @@ class LSTM(nn.Module):
         # shape: (1, lstm_output_dim)
         return self(env.action_to_action_vec_lstm(action), [1])[0, :, :]
 
-    def print_memory(self, env, i_episode, state, action, invalid_actions,
-                     next_state, reward, last_output, next_invalid_actions,
-                     verbose):
-        state_x, state_y = env.state_to_x_y(state)
-        text_act = ['L', 'R', 'U', 'D'][action]
-        if next_state is None:
-            text_next_state = '     G,  '
-        else:
-            next_state_x, next_state_y = env.state_to_x_y(next_state)
-            text_next_state = (next_state_x, next_state_y), ", "
-        # print if verbose=True or verbose=False && terminal state or verbose=False && test
-        if verbose or next_state is None or i_episode == 'test':
-            print('episode',
-                  i_episode,
-                  'push to mem:',
-                  (state_x, state_y),
-                  text_next_state,
-                  text_act, "_", action,
-                  ', reward:', reward.numpy()[0],
-                  ', invalid actions', invalid_actions,
-                  'mem size:', len(self.memory))
-
-            last_output_np = last_output.detach().numpy()[0]
-            last_output_np[next_invalid_actions] = 0
-            print("next output", last_output_np)

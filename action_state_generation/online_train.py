@@ -24,6 +24,7 @@ def test(env, i_train_episode, policy_net, verbose):
     state = env.cur()
     invalid_actions = env.invalid_actions()
     last_output = None
+    final_accumulated_reward = 0
     # reset the LSTM hidden state. Must be done before you run a new episode. Otherwise the LSTM will treat
     # a new episode as a continuation of the last episode
     # for other models, this function will do nothing
@@ -41,8 +42,8 @@ def test(env, i_train_episode, policy_net, verbose):
         # needs to compute Q(s', a) for all a, which will be used in the next iteration
         last_output = policy_net.output(env, action, next_state)
 
-        policy_net.print_memory(
-            env,
+        env.print_memory(
+            policy_net,
             'test',
             state,
             action,
@@ -54,21 +55,20 @@ def test(env, i_train_episode, policy_net, verbose):
             verbose,
         )
 
+        final_accumulated_reward += reward.numpy()[0]
         # Move to the next state
         state = next_state
         invalid_actions = next_invalid_actions
 
         if done:
-            duration = t+1
-            final_reward = reward.numpy()[0]
+            duration = t + 1
             break
 
-        if t > 30:
-            duration = 30
-            final_reward = reward.numpy()[0]
+        if t > env.test_step_limit():
+            duration = env.test_step_limit()
             break
 
-    return duration, final_reward
+    return duration, final_accumulated_reward
 
 
 def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
@@ -83,6 +83,9 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
     elif env_str == 'rnn':
         from env.rnn_gridworld_env import GridWorldEnv
         env = GridWorldEnv(device)
+    elif env_str == 'lunar':
+        from env.lunar_env import LunarEnv
+        env = LunarEnv(device)
 
     if model_str == 'lstm':
         lstm_input_dim = lstm_output_dim = env.action_dim
@@ -135,8 +138,8 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
             if done:
                 next_state = None
 
-            policy_net.print_memory(
-                env,
+            env.print_memory(
+                policy_net,
                 i_episode,
                 state,
                 action,
@@ -221,13 +224,13 @@ def train_main(model_str, env_str, train_times, batch_size, gamma,
             }
         )
         plot_seaborn(reward_df, xaxis='epoch', yaxis='reward',
-                     title='reward_plot_{}_{}'.format(model_str, env_str),
-                     file='reward_plot_{}_{}.png'.format(model_str, env_str),
+                     title='reward_plot_{}_{}_tt{}_eps{}'.format(model_str, env_str, train_times, num_episodes),
+                     file='reward_plot_{}_{}_tt{}_eps{}.png'.format(model_str, env_str, train_times, num_episodes),
                      show=False)
 
 
 if __name__ == '__main__':
-    TRAIN_TIMES = 3
+    TRAIN_TIMES = 1
     BATCH_SIZE = 4
     GAMMA = 0.9
     TEST_EVERY_EPISODE = 10
@@ -235,13 +238,14 @@ if __name__ == '__main__':
     REPLAY_MEMORY_SIZE = 1000
     NUM_EPISODES = 3001
     LEARNING_START_EPISODES = 500
-    VERBOSE = False
+    VERBOSE = True
     PLOT = True
 
-    model_str = 'lstm'
-    # model_str = 'dqn'
+    # model_str = 'lstm'
+    model_str = 'dqn'
     # env_str = 'finite'
-    env_str = 'rnn'
+    # env_str = 'rnn'
+    env_str = "lunar"
 
     train_main(
         model_str,
