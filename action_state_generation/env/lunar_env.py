@@ -18,14 +18,10 @@ class LunarEnv:
 
     def test_step_limit(self):
         """ test step limit. If test steps beyond this limit, terminate the episode """
-        return 220
+        return 1001
 
     def cur(self):
         return self.cur_state
-
-    def state_to_x_y(self, state):
-        x, y, _ = state
-        return x, y
 
     def action_to_action_vec_lstm(self, action):
         tensor_action = torch.zeros((1, 1, self.action_dim))
@@ -55,9 +51,9 @@ class LunarEnv:
 
     def print_memory(self, net, i_episode, state, action, invalid_actions,
                      next_state, reward, last_output, next_invalid_actions,
-                     verbose):
+                     epsilon, verbose):
         np.set_printoptions(precision=2)
-        text_act = ['ACT1', 'ACT2', 'ACT3', 'ACT4'][action]
+        text_act = 'ACT' + str(action)
         if next_state is None:
             text_next_state = '   G'
         else:
@@ -65,12 +61,13 @@ class LunarEnv:
             text_next_state = str(next_state)
         # print if verbose=True or verbose=False && terminal state or verbose=False && test
         if verbose or next_state is None or i_episode == 'test':
-            print("episode {} push to mem: {}, next_state: {}, {}, reward: {}, mem size: {}"
+            print("episode {} push to mem: {}, next_state: {}, {}, reward: {}, eps: {}, mem size: {}"
                   .format(i_episode,
                           state,
                           text_next_state,
                           text_act,
                           reward.numpy()[0],
+                          epsilon,
                           len(net.memory)
                           )
                   )

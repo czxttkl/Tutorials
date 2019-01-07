@@ -151,7 +151,7 @@ class GridWorldEnv:
 
     def print_memory(self, net, i_episode, state, action, invalid_actions,
                      next_state, reward, last_output, next_invalid_actions,
-                     verbose):
+                     epsilon, verbose):
         state_x, state_y = self.state_to_x_y(state)
         text_act = ['L', 'R', 'U', 'D'][action]
         if next_state is None:
@@ -169,6 +169,7 @@ class GridWorldEnv:
                   text_act, "_", action,
                   ', reward:', reward.numpy()[0],
                   ', invalid actions', invalid_actions,
+                  ', epsi:', epsilon,
                   'mem size:', len(net.memory))
 
             last_output_np = last_output.detach().numpy()[0]
