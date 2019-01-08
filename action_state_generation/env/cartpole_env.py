@@ -5,13 +5,13 @@ State space is 4-dimensional continuous space. Action space is 2 discrete action
 import numpy as np
 import torch
 import gym
-from lunar_env import LunarEnv
+from env.lunar_env import LunarEnv
 
 
 class CartPoleEnv(LunarEnv):
 
     def __init__(self, device):
-        self.env = gym.make("MountainCar-v0")
+        self.env = gym.make("CartPole-v0")
         self.device = device
         self.action_dim = self.env.action_space.n
         self.state_dim = self.env.observation_space.shape[0]
