@@ -127,7 +127,7 @@ def test_balance_label():
     X_nn_train, Y_nn_train, X_nn_test, Y_nn_test = balance_nn_labels(X_nn_train, Y_nn_train, X_nn_test, Y_nn_test)
     assert np.array_equal(X_nn_train, np.array([[1, 2, 3, 4], [5, 6, 7, 8]]))
     assert np.array_equal(Y_nn_train, np.array([0, 1]))
-    assert np.array_equal(X_nn_test, np.array([[11, 12, 13, 14], [12, 13, 14, 15]]))
+    assert np.array_equal(X_nn_test, np.array([[11, 12, 13, 14], [15, 16, 17, 18]]))
     assert np.array_equal(Y_nn_test, np.array([1, 0]))
 
 
