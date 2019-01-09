@@ -19,7 +19,9 @@ loss_funcs = {'mse': 'mse', 'huber': huber_loss}
 
 class DQNSolver:
     def __init__(
-            self, n_episodes=20000,
+            self,
+            env_name,
+            n_episodes=20000,
             n_win_ticks=195,
             max_env_steps=None,
             gamma=1.0,
@@ -34,11 +36,9 @@ class DQNSolver:
             monitor=False,
     ):
         self.memory = deque(maxlen=200000)
-        self.env = gym.make('LunarLander-v2')
-        # self.env = gym.make('CartPole-v0')
+        self.env = gym.make(env_name)
         if monitor:
-            self.env = gym.wrappers.Monitor(self.env, '../data/lunarlander-1', force=True)
-            # self.env = gym.wrappers.Monitor(self.env, '../data/cartpole-1', force=True)
+            self.env = gym.wrappers.Monitor(self.env, '../data/{}'.format(env_name), force=True)
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
@@ -113,7 +113,7 @@ class DQNSolver:
             mean_final_score = np.mean(final_scores)
             mean_accu_score = np.mean(accu_scores)
             if accu_reward >= self.n_win_ticks:
-                print('Solved after {} trials ✔'.format(e))
+                print('Solved after {} trials, score {} ✔'.format(e, accu_reward))
                 return e - 100
 
             if e % 10 == 0:
@@ -128,9 +128,10 @@ class DQNSolver:
                       .format(e, mean_final_score, mean_accu_score, mean_loss))
 
         print('Did not solve after {} episodes 😞'.format(e))
-        return e
+        return 9999999999
 
 
 if __name__ == '__main__':
-    agent = DQNSolver()
+    agent = DQNSolver(env_name='CartPole-v0')
+    # agent = DQNSolver(env_name='LunarLander-v2')
     agent.run()
