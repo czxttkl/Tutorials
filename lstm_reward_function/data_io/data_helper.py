@@ -203,3 +203,44 @@ def generate_lstm_data(X_state,
     print(X_nn_test)
 
     return X_nn_train, X_nn_test, Y_nn_train, Y_nn_test, X_nn_train_lens, X_nn_test_lens
+
+
+def balance_nn_labels(X_nn_train, Y_nn_train, X_nn_test, Y_nn_test):
+    print(
+        "Before label balance: \nY_train=1: {}, \nY_train=0: {}, \nY_test=1: {}, \nY_test=0: {}".format(
+            np.sum(Y_nn_train == 1),
+            np.sum(Y_nn_train == 0),
+            np.sum(Y_nn_test == 1),
+            np.sum(Y_nn_test == 0),
+        )
+    )
+
+    one_index_train = np.where(Y_nn_train == 1)[0]
+    zero_index_train = np.where(Y_nn_train == 0)[0]
+    one_index_test = np.where(Y_nn_test == 1)[0]
+    zero_index_test = np.where(Y_nn_test == 0)[0]
+    if len(one_index_test) > len(zero_index_test):
+        index_test_to_remove = one_index_test[:(len(one_index_test) - len(zero_index_test))]
+    else:
+        index_test_to_remove = zero_index_test[:(len(zero_index_test) - len(one_index_test))]
+
+    if len(one_index_train) > len(zero_index_train):
+        index_train_to_remove = one_index_train[:(len(one_index_train) - len(zero_index_train))]
+    else:
+        index_train_to_remove = zero_index_train[:(len(zero_index_train) - len(one_index_train))]
+
+    X_nn_train = np.delete(X_nn_train, index_train_to_remove, axis=0)
+    Y_nn_train = np.delete(Y_nn_train, index_train_to_remove, axis=0)
+    X_nn_test = np.delete(X_nn_test, index_test_to_remove, axis=0)
+    Y_nn_test = np.delete(Y_nn_test, index_test_to_remove, axis=0)
+
+    print(
+        "\nAfter label balance: \nY_train=1: {}, \nY_train=0: {}, \nY_test=1: {}, \nY_test=0: {}".format(
+            np.sum(Y_nn_train == 1),
+            np.sum(Y_nn_train == 0),
+            np.sum(Y_nn_test == 1),
+            np.sum(Y_nn_test == 0),
+        )
+    )
+
+    return X_nn_train, Y_nn_train, X_nn_test, Y_nn_test

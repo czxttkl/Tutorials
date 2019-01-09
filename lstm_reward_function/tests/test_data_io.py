@@ -3,7 +3,12 @@ import numpy as np
 import sys, os
 myPath = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, myPath + '/../')
-from data_io.data_helper import generate_raw_data, generate_nn_data, generate_lstm_data
+from data_io.data_helper import (
+    generate_raw_data,
+    generate_nn_data,
+    generate_lstm_data,
+    balance_nn_labels,
+)
 
 
 def test_data_io():
@@ -111,7 +116,21 @@ def test_data_io():
     assert np.array_equal(X_nn_test[0, :], np.array([2, 0, 1, 2, 3]) - np.array([5, 0, 1, 3, 4]))
     assert Y_nn_train[0] == 0
     assert Y_nn_test[0] == 1
+    print()
+
+
+def test_balance_label():
+    X_nn_train = np.array([[1, 2, 3, 4], [2, 3, 4, 5], [5, 6, 7, 8]])
+    Y_nn_train = np.array([0, 1, 1])
+    X_nn_test = np.array([[11, 12, 13, 14], [12, 13, 14, 15], [15, 16, 17, 18]])
+    Y_nn_test = np.array([1, 0, 0])
+    X_nn_train, Y_nn_train, X_nn_test, Y_nn_test = balance_nn_labels(X_nn_train, Y_nn_train, X_nn_test, Y_nn_test)
+    assert np.array_equal(X_nn_train, np.array([[1, 2, 3, 4], [5, 6, 7, 8]]))
+    assert np.array_equal(Y_nn_train, np.array([0, 1]))
+    assert np.array_equal(X_nn_test, np.array([[11, 12, 13, 14], [12, 13, 14, 15]]))
+    assert np.array_equal(Y_nn_test, np.array([1, 0]))
 
 
 if __name__ == '__main__':
     test_data_io()
+    test_balance_label()
