@@ -74,7 +74,7 @@ def test_data_io():
     X_nn_train, X_nn_test, Y_nn_train, Y_nn_test, X_nn_train_lens, X_nn_test_lens = \
         generate_lstm_data(
             X_state,
-            X_reward,
+            None,  # not using X_reward
             X_action,
             X_time_diff,
             Y,
@@ -100,7 +100,7 @@ def test_data_io():
     X_nn_train, X_nn_test, Y_nn_train, Y_nn_test = \
         generate_nn_data(
             X_state,
-            X_reward,
+            None,  # not using X_reward
             X_action,
             X_time_diff,
             Y,

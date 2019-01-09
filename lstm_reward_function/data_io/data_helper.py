@@ -53,18 +53,20 @@ def generate_nn_data(X_state,
                      Y,
                      data_users,
                      test_denominator):
-    X_nn_train = [np.hstack((
-                    X_time_diff[mdp_id][-1],
-                    X_action[mdp_id][-1],
-                    X_state[mdp_id][-1],
-                  ))
+    feature_data = []
+    for data in [X_time_diff, X_action, X_state, X_reward]:
+        if data is not None:
+            feature_data.append(data)
+    assert len(feature_data) >= 1
+
+    X_nn_train = [np.hstack(
+                    tuple(data[mdp_id][-1] for data in feature_data)
+                  )
                   for mdp_id in data_users[len(data_users)//test_denominator:]]
 
-    X_nn_test = [np.hstack((
-                    X_time_diff[mdp_id][-1],
-                    X_action[mdp_id][-1],
-                    X_state[mdp_id][-1],
-                  ))
+    X_nn_test = [np.hstack(
+                    tuple(data[mdp_id][-1] for data in feature_data)
+                  )
                   for mdp_id in data_users[:len(data_users)//test_denominator]]
 
     Y_nn_train = [Y[mdp_id][-1] for mdp_id in data_users[len(data_users)//test_denominator:]]
@@ -125,6 +127,12 @@ def generate_lstm_data(X_state,
                        max_seq_len,
                        lstm_feature_size,
                        test_denominator):
+    feature_data = []
+    for data in [X_time_diff, X_action, X_state, X_reward]:
+        if data is not None:
+            feature_data.append(data)
+    assert len(feature_data) >= 1
+
     X_nn_train_lens = np.zeros(len(data_users) - len(data_users) // test_denominator, dtype=int)
     X_nn_test_lens = np.zeros(len(data_users) // test_denominator, dtype=int)
     X_nn_train = np.zeros((len(data_users) - len(data_users) // test_denominator,
@@ -134,21 +142,17 @@ def generate_lstm_data(X_state,
 
     for i, mdp_id in enumerate(data_users[len(data_users) // test_denominator:]):
         for j in range(len(X_state[mdp_id])):
-            X_nn_train[i, j, :] = np.hstack((
-                X_time_diff[mdp_id][j],
-                X_action[mdp_id][j],
-                X_state[mdp_id][j],
-            ))
-        X_nn_train_lens[i] = len(X_state[mdp_id])
+            X_nn_train[i, j, :] = np.hstack(
+                tuple(data[mdp_id][j] for data in feature_data)
+            )
+        X_nn_train_lens[i] = len(feature_data[0][mdp_id])
 
     for i, mdp_id in enumerate(data_users[:len(data_users) // test_denominator]):
         for j in range(len(X_state[mdp_id])):
-            X_nn_test[i, j, :] = np.hstack((
-                X_time_diff[mdp_id][j],
-                X_action[mdp_id][j],
-                X_state[mdp_id][j],
-            ))
-        X_nn_test_lens[i] = len(X_state[mdp_id])
+            X_nn_test[i, j, :] = np.hstack(
+                tuple(data[mdp_id][j] for data in feature_data)
+            )
+        X_nn_test_lens[i] = len(feature_data[0][mdp_id])
 
     Y_nn_train = np.array([Y[mdp_id][-1] for mdp_id in data_users[len(data_users) // test_denominator:]])
 
