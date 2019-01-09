@@ -18,20 +18,21 @@ loss_funcs = {'mse': 'mse', 'huber': huber_loss}
 
 
 class DQNSolver:
-    def __init__(self, n_episodes=20000,
-                 n_win_ticks=195,
-                 max_env_steps=None,
-                 gamma=0.9,
-                 epsilon=1.0,
-                 epsilon_min=0.2,
-                 epsilon_log_decay=0.995,
-                 alpha=0.001,
-                 alpha_decay=0.0,
-                 batch_size=256,
-                 double_q=True,
-                 loss='mse',
-                 monitor=False,
-                 quiet=False):
+    def __init__(
+            self, n_episodes=20000,
+            n_win_ticks=195,
+            max_env_steps=None,
+            gamma=1.0,
+            epsilon=1.0,
+            epsilon_min=0.2,
+            epsilon_log_decay=0.995,
+            alpha=0.001,
+            alpha_decay=0.0,
+            batch_size=256,
+            double_q=True,
+            loss='mse',
+            monitor=False,
+    ):
         self.memory = deque(maxlen=200000)
         self.env = gym.make('LunarLander-v2')
         # self.env = gym.make('CartPole-v0')
@@ -47,7 +48,6 @@ class DQNSolver:
         self.n_episodes = n_episodes
         self.n_win_ticks = n_win_ticks
         self.batch_size = batch_size
-        self.quiet = quiet
         self.double_q = double_q
         if max_env_steps is not None: self.env._max_episode_steps = max_env_steps
 
@@ -99,21 +99,21 @@ class DQNSolver:
         for e in range(self.n_episodes):
             state = self.preprocess_state(self.env.reset())
             done = False
-            i = 0
+            accu_reward = 0
             while not done:
                 action = self.choose_action(state, self.get_epsilon(e))
                 next_state, reward, done, _ = self.env.step(action)
                 next_state = self.preprocess_state(next_state)
                 self.remember(state, action, reward, next_state, done)
                 state = next_state
-                i += reward
+                accu_reward += reward
 
             final_scores.append(reward)
-            accu_scores.append(i)
+            accu_scores.append(accu_reward)
             mean_final_score = np.mean(final_scores)
             mean_accu_score = np.mean(accu_scores)
-            if mean_accu_score >= self.n_win_ticks and e >= 100:
-                if not self.quiet: print('Ran {} episodes. Solved after {} trials ✔'.format(e, e - 100))
+            if accu_reward >= self.n_win_ticks:
+                print('Solved after {} trials ✔'.format(e))
                 return e - 100
 
             if e % 10 == 0:
@@ -123,11 +123,11 @@ class DQNSolver:
             losses.append(loss)
             mean_loss = np.mean(losses)
 
-            if e % 100 == 0 and not self.quiet:
+            if e % 100 == 0:
                 print('[Episode {}] - Last 100 episodes final reward: {}, accu reward: {}, mean loss: {}'
                       .format(e, mean_final_score, mean_accu_score, mean_loss))
 
-        if not self.quiet: print('Did not solve after {} episodes 😞'.format(e))
+        print('Did not solve after {} episodes 😞'.format(e))
         return e
 
 
