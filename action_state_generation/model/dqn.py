@@ -36,7 +36,7 @@ class DQN(nn.Module):
             return len(self.memory)
 
     def __init__(self, dqn_input_dim, dqn_num_layer, dqn_hidden_dim, dqn_output_dim,
-                 gamma, replay_memory_size, training_batch_size):
+                 parametric, gamma, replay_memory_size, training_batch_size):
         super(DQN, self).__init__()
         h_sizes = [dqn_input_dim] + [dqn_hidden_dim] * dqn_num_layer + [dqn_output_dim]
         self.hidden = nn.ModuleList()
@@ -50,6 +50,7 @@ class DQN(nn.Module):
         self.dqn_hidden_dim = dqn_hidden_dim
         self.dqn_output_dim = dqn_output_dim
 
+        self.parametric = parametric
         self.gamma = gamma
         self.replay_memory_size = replay_memory_size
         self.training_batch_size = training_batch_size
@@ -88,7 +89,7 @@ class DQN(nn.Module):
                 action = random.randrange(action_dim)
         return action
 
-    def optimize_model(self, env):
+    def optimize_model(self, env, target_net=None):
         BATCH_SIZE = self.training_batch_size
 
         transitions = self.memory.sample(BATCH_SIZE)
@@ -109,22 +110,34 @@ class DQN(nn.Module):
                 inv_acts = env.invalid_actions_by_state(t.next_state)
                 valid_action_masks[i, inv_acts] = 0
 
-        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the columns of actions taken
-        state_action_values = self(state_batch).gather(1, action_batch)
-
-        # Compute V(s_{t+1}) for all next states.
-        next_state_full_values = self(next_state_batch)
+        # Compute Q(s_{t+1}, a)
+        if target_net:
+            next_state_full_values = target_net(next_state_batch)
+        else:
+            next_state_full_values = self(next_state_batch)
         next_state_full_values *= non_final_mask
         next_state_full_values *= valid_action_masks
         next_state_max_values = next_state_full_values.max(1)[0].detach()
         # Compute the expected Q values
         expected_state_action_values = (next_state_max_values * self.gamma) + reward_batch
+        # expected_state_action_values = expected_state_action_values.detach().numpy()
+        # expected_state_action_values = torch.from_numpy(expected_state_action_values)
 
-        # Compute Huber loss
-        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
-        print('loss:', loss.item())
+        # if parametric is True, only fit the q-values of the states/actions that have been visited
+        if self.parametric:
+            # Compute Q(s_t, a) - the model computes Q(s_t), then we select the columns of actions taken
+            state_action_values = self(state_batch).gather(1, action_batch)
+            # Compute Huber loss
+            loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+        else:
+            state_full_values = self(state_batch)
+            state_full_values_to_fit = state_full_values.clone().detach()
+            state_full_values_to_fit[list(range(BATCH_SIZE)), action_batch.squeeze()] = expected_state_action_values
+            # Compute MSE loss
+            loss = F.smooth_l1_loss(state_full_values, state_full_values_to_fit)
 
         # Optimize the model
+        print('loss:', loss.item())
         self.optimizer.zero_grad()
         loss.backward()
         for param in self.parameters():
@@ -136,4 +149,3 @@ class DQN(nn.Module):
         # return self(next_state[:, :-1])
         next_state_vec = env.state_to_state_vec_dqn(next_state)
         return self(next_state_vec)
-

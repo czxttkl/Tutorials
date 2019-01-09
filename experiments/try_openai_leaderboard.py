@@ -7,12 +7,6 @@ from keras.models import Sequential
 from keras.layers import Dense
 from keras.optimizers import Adam
 from keras.models import clone_model
-import os
-import sys
-myPath = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, myPath + '/../action_state_generation/model/')
-from dqn import DQN
-import torch.optim as optim
 import tensorflow as tf
 
 
@@ -23,7 +17,7 @@ def huber_loss(y_true, y_pred):
 loss_funcs = {'mse': 'mse', 'huber': huber_loss}
 
 
-class DQNSolver():
+class DQNSolver:
     def __init__(self, n_episodes=20000,
                  n_win_ticks=195,
                  max_env_steps=None,
@@ -34,13 +28,16 @@ class DQNSolver():
                  alpha=0.001,
                  alpha_decay=0.0,
                  batch_size=256,
-                 double_q=False,
+                 double_q=True,
+                 loss='mse',
                  monitor=False,
                  quiet=False):
         self.memory = deque(maxlen=200000)
-        self.env = gym.make('CartPole-v0')
+        self.env = gym.make('LunarLander-v2')
+        # self.env = gym.make('CartPole-v0')
         if monitor:
-            self.env = gym.wrappers.Monitor(self.env, '../data/cartpole-1', force=True)
+            self.env = gym.wrappers.Monitor(self.env, '../data/lunarlander-1', force=True)
+            # self.env = gym.wrappers.Monitor(self.env, '../data/cartpole-1', force=True)
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
@@ -59,23 +56,8 @@ class DQNSolver():
         self.model.add(Dense(100, input_dim=self.env.observation_space.shape[0], activation='tanh'))
         self.model.add(Dense(100, activation='relu'))
         self.model.add(Dense(self.env.action_space.n, activation='linear'))
-        self.model.compile(loss=huber_loss, optimizer=Adam(lr=self.alpha, decay=self.alpha_decay))
+        self.model.compile(loss=loss_funcs[loss], optimizer=Adam(lr=self.alpha, decay=self.alpha_decay))
         self.target_model = clone_model(self.model)
-
-        # Init my DQN
-        dqn_input_dim = self.env.observation_space.shape[0]
-        dqn_hidden_dim = 100
-        dqn_num_layer = 2
-        replay_memory_size = 10000
-        dqn_output_dim = self.env.action_space.n
-        parametric = False
-        policy_net = DQN(dqn_input_dim, dqn_num_layer,
-                         dqn_hidden_dim, dqn_output_dim,
-                         parametric, gamma, replay_memory_size, batch_size)
-        policy_net.optimizer = optim.Adam(policy_net.parameters())
-        self.policy_net = policy_net
-        # self.model.fit = self.policy_net.fit
-        # self.model.predict = self.policy_net.predict
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))

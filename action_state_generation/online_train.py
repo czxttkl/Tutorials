@@ -17,7 +17,19 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'invalid_actions', 'next_state', 'reward'))
 
 
-def test(env, i_train_episode, policy_net, verbose):
+def adjust_epsilon(cur_episode, final_episode, learning_start_episodes):
+    if cur_episode < learning_start_episodes:
+        # make policy network select random actions
+        return 1
+    # make 0.05 <= epsilon < 0.5
+    temp_epsilon = (0.99 ** (cur_episode - learning_start_episodes)) * 0.5
+    if temp_epsilon < 0.05:
+        return 0.05
+    else:
+        return temp_epsilon
+
+
+def test(env, gamma, i_train_episode, policy_net, verbose):
     print("-------------test at {} train episode------------".format(i_train_episode))
     # Initialize the environment and state
     env.reset()
@@ -52,10 +64,16 @@ def test(env, i_train_episode, policy_net, verbose):
             reward,
             last_output,
             next_invalid_actions,
+            0,  # epsilon
             verbose,
         )
 
+        # final_accumulated_reward += np.power(gamma, t) * reward.numpy()[0]
+        # final reward (no discounted):
         final_accumulated_reward += reward.numpy()[0]
+        # final reward (no accumulated):
+        # final_accumulated_reward = reward.numpy()[0]
+
         # Move to the next state
         state = next_state
         invalid_actions = next_invalid_actions
@@ -68,10 +86,10 @@ def test(env, i_train_episode, policy_net, verbose):
             duration = env.test_step_limit()
             break
 
-    return duration, final_accumulated_reward
+    return duration, np.round(final_accumulated_reward, 2)
 
 
-def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
+def train(model_str, env_str, batch_size, gamma, test_every_episode,
           replay_memory_size, num_episodes, learning_start_episodes, verbose):
     episode_durations = []
     test_episode_durations = []
@@ -86,6 +104,9 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
     elif env_str == 'lunar':
         from env.lunar_env import LunarEnv
         env = LunarEnv(device)
+    elif env_str == 'cartpole':
+        from env.cartpole_env import CartPoleEnv
+        env = CartPoleEnv(device)
 
     if model_str == 'lstm':
         lstm_input_dim = lstm_output_dim = env.action_dim
@@ -100,16 +121,23 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
         dqn_hidden_dim = 168
         dqn_num_layer = 2
         dqn_output_dim = env.action_dim
+        parametric = False
         policy_net = DQN(dqn_input_dim, dqn_num_layer,
                          dqn_hidden_dim, dqn_output_dim,
-                         gamma, replay_memory_size, batch_size)\
-                     .to(device)
+                         parametric, gamma, replay_memory_size,
+                         batch_size).to(device)
+        target_net = DQN(dqn_input_dim, dqn_num_layer,
+                         dqn_hidden_dim, dqn_output_dim,
+                         parametric, gamma, replay_memory_size,
+                         batch_size).to(device)
+        target_net.load_state_dict(policy_net.state_dict())
+        target_net.eval()
     else:
         raise Exception
 
     print(policy_net)
     print("trainable param num:", policy_net.num_of_params())
-    policy_net.optimizer = optim.RMSprop(policy_net.parameters())
+    policy_net.optimizer = optim.Adam(policy_net.parameters())
 
     for i_episode in range(num_episodes):
         # Initialize the environment and state
@@ -118,6 +146,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
         invalid_actions = env.invalid_actions()
         episode_memory = []
         last_output = None
+        epsilon = adjust_epsilon(i_episode, num_episodes, learning_start_episodes)
         # reset the LSTM hidden state. Must be done before you run a new episode. Otherwise the LSTM will treat
         # a new episode as a continuation of the last episode
         # for other models, this function will do nothing
@@ -127,7 +156,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
             # Select and perform an action
             action_dim = env.action_dim
             action = policy_net.select_action(
-                env, t, state, last_output, invalid_actions, action_dim, eps_thres)
+                env, t, state, last_output, invalid_actions, action_dim, epsilon)
 
             # env step
             next_state, next_invalid_actions, reward, done, _ = env.step(action)
@@ -148,6 +177,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
                 reward,
                 last_output,
                 next_invalid_actions,
+                epsilon,
                 verbose,
             )
 
@@ -166,8 +196,12 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
         # Store the episode transitions in memory
         policy_net.memory.push(episode_memory)
 
+        # perform test and target network update
         if i_episode % test_every_episode == 0:
-            test_duration, final_test_reward = test(env, i_episode, policy_net, verbose)
+            target_net.load_state_dict(policy_net.state_dict())
+
+            results = [test(env, gamma, i_episode, policy_net, verbose) for _ in range(1)]
+            test_duration, final_test_reward = np.mean([r[0] for r in results]), np.mean([r[1] for r in results])
             test_episode_durations.append(test_duration)
             test_episode_rewards.append(final_test_reward)
             print('Complete Testing')
@@ -177,21 +211,21 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode, eps_thres,
 
         # Perform one step of the optimization
         if i_episode > learning_start_episodes:
-            policy_net.optimize_model(env)
+            policy_net.optimize_model(env, target_net)
 
     print('Complete Training')
     return test_episode_durations, test_episode_rewards
 
 
 def train_main(model_str, env_str, train_times, batch_size, gamma,
-               test_every_episode, eps_thres, replay_memory_size,
+               test_every_episode, replay_memory_size,
                num_episodes, learning_start_episodes, verbose, plot):
     test_durations = []
     test_rewards = []
     for i in range(train_times):
         duration, reward = train(
-            model_str, env_str, batch_size, gamma, test_every_episode,
-            eps_thres, replay_memory_size, num_episodes,
+            model_str, env_str, batch_size, gamma,
+            test_every_episode, replay_memory_size, num_episodes,
             learning_start_episodes, verbose)
         test_durations.append(duration)
         test_rewards.append(reward)
@@ -231,14 +265,13 @@ def train_main(model_str, env_str, train_times, batch_size, gamma,
 
 if __name__ == '__main__':
     TRAIN_TIMES = 1
-    BATCH_SIZE = 4
-    GAMMA = 0.9
+    BATCH_SIZE = 1000
+    GAMMA = 1.0
     TEST_EVERY_EPISODE = 10
-    EPS_THRES = 0.4
-    REPLAY_MEMORY_SIZE = 1000
-    NUM_EPISODES = 3001
+    REPLAY_MEMORY_SIZE = 200000
+    NUM_EPISODES = 20001
     LEARNING_START_EPISODES = 500
-    VERBOSE = True
+    VERBOSE = False
     PLOT = True
 
     # model_str = 'lstm'
@@ -246,6 +279,7 @@ if __name__ == '__main__':
     # env_str = 'finite'
     # env_str = 'rnn'
     env_str = "lunar"
+    # env_str = "cartpole"
 
     train_main(
         model_str,
@@ -254,7 +288,6 @@ if __name__ == '__main__':
         BATCH_SIZE,
         GAMMA,
         TEST_EVERY_EPISODE,
-        EPS_THRES,
         REPLAY_MEMORY_SIZE,
         NUM_EPISODES,
         LEARNING_START_EPISODES,
