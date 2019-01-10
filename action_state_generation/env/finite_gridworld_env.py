@@ -18,18 +18,16 @@ D = 3
 
 class GridWorldEnv:
 
-    def __init__(self, device):
+    def __init__(self, device, grid=None):
         # x, y
         self.agent_pos = [0, 0]
-        self.back_step = 0
-        # can only go back (L or U) this many times. for testing limited length seqs
-        self.back_step_thres = 400000
-
+        # an episodes terminals when back_steps > 100
+        self.back_steps = 0
         # self.grid = np.array(
         #     [
         #         [S, 0, 0, G],
         #     ]
-        # )
+        # ) if grid is None else grid
 
         # self.grid = np.array(
         #     [
@@ -38,7 +36,7 @@ class GridWorldEnv:
         #         [0, W, G, 0],
         #         [0, 0, 0, 0],
         #     ]
-        # )
+        # ) if grid is None else grid
 
         self.grid = np.array(
             [
@@ -46,7 +44,7 @@ class GridWorldEnv:
                 [W, 0, 0],
                 [G, 0, 0],
             ]
-        )
+        ) if grid is None else grid
 
         # self.grid = np.array(
         #     [
@@ -54,11 +52,10 @@ class GridWorldEnv:
         #         [0, W],
         #         [0, G],
         #     ]
-        # )
+        # ) if grid is None else grid
 
         self.device = device
         self.action_dim = 4
-        # exclude the last dim of the state, which records # of back-steps
         self.state_dim = self.grid.shape[0] * self.grid.shape[1]
 
     def test_step_limit(self):
@@ -67,10 +64,10 @@ class GridWorldEnv:
 
     def cur(self):
         x, y = self.agent_pos
-        return x, y, self.back_step
+        return x, y
 
     def state_to_x_y(self, state):
-        x, y, _ = state
+        x, y = state
         return x, y
 
     def action_to_action_vec_lstm(self, action):
@@ -80,7 +77,7 @@ class GridWorldEnv:
 
     def state_to_state_vec_dqn(self, state):
         """ from state representation to state vector used in dqn """
-        x, y, _ = state
+        x, y = state
         w, h = self.grid.shape[1], self.grid.shape[0]
         out = np.zeros((1, w * h))
         out[0, x * w + y] = 1
@@ -89,7 +86,7 @@ class GridWorldEnv:
 
     def reset(self):
         self.agent_pos = [0, 0]
-        self.back_step = 0
+        self.back_steps = 0
 
     def step(self, action):
         x, y = self.agent_pos
@@ -115,18 +112,17 @@ class GridWorldEnv:
             else:
                 raise Exception
 
-        done = self.grid[self.agent_pos[0], self.agent_pos[1]] == G
-        reward = 10 if done else 0
+        done = (self.grid[self.agent_pos[0], self.agent_pos[1]] == G) or (self.back_steps > 100)
+        self.back_steps += 1
+        reward = 10 if (self.grid[self.agent_pos[0], self.agent_pos[1]] == G) else 0
         reward = torch.tensor([reward], device=self.device).float()
-        if action == L or action == U:
-            self.back_step += 1
         return self.cur(), self.invalid_actions(), reward, done, None
 
     def invalid_actions(self):
-        x, y, bs = self.cur()
-        return self.invalid_actions_by_x_y_backstep(x, y, bs)
+        x, y = self.cur()
+        return self.invalid_actions_by_x_y(x, y)
 
-    def invalid_actions_by_x_y_backstep(self, x, y, bs):
+    def invalid_actions_by_x_y(self, x, y):
         w, h = self.grid.shape[1], self.grid.shape[0]
         ia = []
         if y == 0 or self.grid[x, y - 1] == W:
@@ -137,16 +133,11 @@ class GridWorldEnv:
             ia.append(U)
         if x == h - 1 or self.grid[x + 1, y] == W:
             ia.append(D)
-        if bs >= self.back_step_thres and len(ia) < 3:
-            if L not in ia:
-                ia.append(L)
-            if U not in ia:
-                ia.append(U)
         return ia
 
     def invalid_actions_by_state(self, state):
-        x, y, bs = state
-        invalid_actions = self.invalid_actions_by_x_y_backstep(x, y, bs)
+        x, y = state
+        invalid_actions = self.invalid_actions_by_x_y(x, y)
         return invalid_actions
 
     def print_memory(self, net, i_episode, state, action, invalid_actions,

@@ -21,7 +21,7 @@ class DQNSolver:
     def __init__(
             self,
             env_name,
-            n_episodes=20000,
+            n_episodes=200000,
             n_win_ticks=195,
             max_env_steps=None,
             gamma=1.0,
@@ -112,7 +112,9 @@ class DQNSolver:
             accu_scores.append(accu_reward)
             mean_final_score = np.mean(final_scores)
             mean_accu_score = np.mean(accu_scores)
-            if accu_reward >= self.n_win_ticks:
+            num_success= np.sum(np.array(accu_scores) >= self.n_win_ticks)
+            # when ten of episodes achieve good score
+            if num_success > 10:
                 print('Solved after {} trials, score {} ✔'.format(e, accu_reward))
                 return e - 100
 
@@ -124,14 +126,14 @@ class DQNSolver:
             mean_loss = np.mean(losses)
 
             if e % 100 == 0:
-                print('[Episode {}] - Last 100 episodes final reward: {}, accu reward: {}, mean loss: {}'
-                      .format(e, mean_final_score, mean_accu_score, mean_loss))
+                print('[Episode {}] - Last 100 episodes final reward: {}, accu reward: {}, loss: {}, # of success: {}'
+                      .format(e, mean_final_score, mean_accu_score, mean_loss, num_success))
 
         print('Did not solve after {} episodes 😞'.format(e))
         return 9999999999
 
 
 if __name__ == '__main__':
-    agent = DQNSolver(env_name='CartPole-v0')
-    # agent = DQNSolver(env_name='LunarLander-v2')
+    # agent = DQNSolver(env_name='CartPole-v0', gamma=1.0, double_q=False)
+    agent = DQNSolver(env_name='LunarLander-v2', gamma=1.0, double_q=True)
     agent.run()

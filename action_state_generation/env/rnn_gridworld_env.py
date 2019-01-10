@@ -66,7 +66,7 @@ class GridWorldEnv:
             # return a scalar
             return Y[0, -1, 0]
 
-    def __init__(self, device):
+    def __init__(self, device, grid=None):
         # x, y
         self.agent_pos = [0, 0]
         # record how many steps an agent has gone
@@ -78,7 +78,7 @@ class GridWorldEnv:
         #     [
         #         [S, 0, 0, G],
         #     ]
-        # )
+        # ) if grid is None else grid
 
         # self.grid = np.array(
         #     [
@@ -87,7 +87,7 @@ class GridWorldEnv:
         #         [0, W, G, 0],
         #         [0, 0, 0, 0],
         #     ]
-        # )
+        # ) if grid is None else grid
 
         self.grid = np.array(
             [
@@ -95,7 +95,7 @@ class GridWorldEnv:
                 [W, 0, 0],
                 [G, 0, 0],
             ]
-        )
+        ) if grid is None else grid
 
         # self.grid = np.array(
         #     [
@@ -103,7 +103,7 @@ class GridWorldEnv:
         #         [0, W],
         #         [0, G],
         #     ]
-        # )
+        # ) if grid is None else grid
 
         self.device = device
         self.action_dim = 4

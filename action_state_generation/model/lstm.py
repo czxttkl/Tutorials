@@ -103,7 +103,7 @@ class LSTM(nn.Module):
                 action = random.randrange(action_dim)
         return action
 
-    def optimize_model(self, env):
+    def optimize_model(self, env, target_net=None):
         BATCH_SIZE = self.training_batch_size
 
         # refresh policy_net hidden state

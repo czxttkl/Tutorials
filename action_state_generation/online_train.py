@@ -5,7 +5,7 @@ from itertools import count
 import torch
 import torch.optim as optim
 import pandas as pd
-from plot_helper import plot_seaborn
+from plot_helper.plot_helper import plot_seaborn
 
 from model.lstm import LSTM
 from model.dqn import DQN
@@ -17,14 +17,13 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'invalid_actions', 'next_state', 'reward'))
 
 
-def adjust_epsilon(cur_episode, final_episode, learning_start_episodes):
+def adjust_epsilon(cur_episode, final_episode, learning_start_episodes, epsilon_thres):
     if cur_episode < learning_start_episodes:
         # make policy network select random actions
         return 1
-    # make 0.05 <= epsilon < 0.5
     temp_epsilon = (0.99 ** (cur_episode - learning_start_episodes)) * 0.5
-    if temp_epsilon < 0.05:
-        return 0.05
+    if temp_epsilon < epsilon_thres:
+        return epsilon_thres
     else:
         return temp_epsilon
 
@@ -90,7 +89,8 @@ def test(env, gamma, i_train_episode, policy_net, verbose):
 
 
 def train(model_str, env_str, batch_size, gamma, test_every_episode,
-          replay_memory_size, num_episodes, learning_start_episodes, verbose):
+          replay_memory_size, num_episodes, learning_start_episodes,
+          epsilon_thres, verbose):
     episode_durations = []
     test_episode_durations = []
     test_episode_rewards = []
@@ -116,6 +116,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
                           lstm_hidden_dim, lstm_output_dim,
                           gamma, replay_memory_size, batch_size)\
                      .to(device)
+        target_net = None
     elif model_str == 'dqn':
         dqn_input_dim = env.state_dim
         dqn_hidden_dim = 168
@@ -126,6 +127,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
                          dqn_hidden_dim, dqn_output_dim,
                          parametric, gamma, replay_memory_size,
                          batch_size).to(device)
+        # target_net = None
         target_net = DQN(dqn_input_dim, dqn_num_layer,
                          dqn_hidden_dim, dqn_output_dim,
                          parametric, gamma, replay_memory_size,
@@ -137,7 +139,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
 
     print(policy_net)
     print("trainable param num:", policy_net.num_of_params())
-    policy_net.optimizer = optim.Adam(policy_net.parameters())
+    policy_net.optimizer = optim.RMSprop(policy_net.parameters())
 
     for i_episode in range(num_episodes):
         # Initialize the environment and state
@@ -146,7 +148,7 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
         invalid_actions = env.invalid_actions()
         episode_memory = []
         last_output = None
-        epsilon = adjust_epsilon(i_episode, num_episodes, learning_start_episodes)
+        epsilon = adjust_epsilon(i_episode, num_episodes, learning_start_episodes, epsilon_thres)
         # reset the LSTM hidden state. Must be done before you run a new episode. Otherwise the LSTM will treat
         # a new episode as a continuation of the last episode
         # for other models, this function will do nothing
@@ -156,7 +158,8 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
             # Select and perform an action
             action_dim = env.action_dim
             action = policy_net.select_action(
-                env, t, state, last_output, invalid_actions, action_dim, epsilon)
+                env, t, state, last_output, invalid_actions, action_dim, epsilon
+            )
 
             # env step
             next_state, next_invalid_actions, reward, done, _ = env.step(action)
@@ -198,7 +201,8 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
 
         # perform test and target network update
         if i_episode % test_every_episode == 0:
-            target_net.load_state_dict(policy_net.state_dict())
+            if target_net:
+                target_net.load_state_dict(policy_net.state_dict())
 
             results = [test(env, gamma, i_episode, policy_net, verbose) for _ in range(1)]
             test_duration, final_test_reward = np.mean([r[0] for r in results]), np.mean([r[1] for r in results])
@@ -219,14 +223,15 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
 
 def train_main(model_str, env_str, train_times, batch_size, gamma,
                test_every_episode, replay_memory_size,
-               num_episodes, learning_start_episodes, verbose, plot):
+               num_episodes, learning_start_episodes,
+               epsilon_thres, verbose, plot):
     test_durations = []
     test_rewards = []
     for i in range(train_times):
         duration, reward = train(
             model_str, env_str, batch_size, gamma,
             test_every_episode, replay_memory_size, num_episodes,
-            learning_start_episodes, verbose)
+            learning_start_episodes, epsilon_thres, verbose)
         test_durations.append(duration)
         test_rewards.append(reward)
 
@@ -261,24 +266,26 @@ def train_main(model_str, env_str, train_times, batch_size, gamma,
                      title='reward_plot_{}_{}_tt{}_eps{}'.format(model_str, env_str, train_times, num_episodes),
                      file='reward_plot_{}_{}_tt{}_eps{}.png'.format(model_str, env_str, train_times, num_episodes),
                      show=False)
+    return test_rewards_ave, test_durations_ave
 
 
 if __name__ == '__main__':
-    TRAIN_TIMES = 1
-    BATCH_SIZE = 1000
-    GAMMA = 1.0
+    TRAIN_TIMES = 5
+    BATCH_SIZE = 4
+    GAMMA = 0.9
+    EPSILON_THRES = 0.4
     TEST_EVERY_EPISODE = 10
     REPLAY_MEMORY_SIZE = 200000
-    NUM_EPISODES = 20001
+    NUM_EPISODES = 5001
     LEARNING_START_EPISODES = 500
     VERBOSE = False
     PLOT = True
 
-    # model_str = 'lstm'
-    model_str = 'dqn'
-    # env_str = 'finite'
+    model_str = 'lstm'
+    # model_str = 'dqn'
+    env_str = 'finite'
     # env_str = 'rnn'
-    env_str = "lunar"
+    # env_str = "lunar"
     # env_str = "cartpole"
 
     train_main(
@@ -291,6 +298,7 @@ if __name__ == '__main__':
         REPLAY_MEMORY_SIZE,
         NUM_EPISODES,
         LEARNING_START_EPISODES,
+        EPSILON_THRES,
         VERBOSE,
         PLOT,
     )
