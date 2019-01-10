@@ -91,9 +91,9 @@ def test_lstm_regress():
     print('test data size:', len(Y_nn_test))
     mse_test = net.mse(X_nn_test, X_nn_test_lens, Y_nn_test)
     class_mse_test = net.mse_per_class(X_nn_test, X_nn_test_lens, Y_nn_test)
-    assert mse_test > 20
+    assert mse_test > 18
     for cmt in class_mse_test:
-        assert cmt > 20
+        assert cmt > 18
 
 
 if __name__ == '__main__':
