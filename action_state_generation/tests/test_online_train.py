@@ -8,7 +8,7 @@ from online_train import train_main
 
 def test_online_train_dqn_gridworld():
     TRAIN_TIMES = 1
-    BATCH_SIZE = 256
+    BATCH_SIZE = 4
     GAMMA = 0.9
     EPSILON_THRES = 0.4
     TEST_EVERY_EPISODE = 10
@@ -47,7 +47,7 @@ def test_online_train_lstm_gridworld():
     EPSILON_THRES = 0.4
     TEST_EVERY_EPISODE = 10
     REPLAY_MEMORY_SIZE = 20000
-    NUM_EPISODES = 2501
+    NUM_EPISODES = 4001
     LEARNING_START_EPISODES = 500
     VERBOSE = False
     PLOT = False
@@ -175,7 +175,7 @@ def test_online_train_cartpole():
 
 if __name__ == "__main__":
     # test_online_train_dqn_gridworld()
-    # test_online_train_lstm_gridworld()
+    test_online_train_lstm_gridworld()
     # test_online_train_lstm_rnn_gridworld()
     # test_online_train_dqn_rnn_gridworld()
-    test_online_train_cartpole()
+    # test_online_train_cartpole()

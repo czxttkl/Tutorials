@@ -8,4 +8,9 @@ install:
   - pip install -q -r requirements.txt
   - pip install pytest-travis-fold
 script:
-  - travis_wait 60 pytest
+  - pytest lstm_reward_function/tests
+  - travis_wait 60 pytest -s action_state_generation/tests/test_online_train::test_online_train_dqn_gridworld
+  - travis_wait 60 pytest -s action_state_generation/tests/test_online_train::test_online_train_lstm_gridworld
+  - travis_wait 60 pytest -s action_state_generation/tests/test_online_train::test_online_train_lstm_rnn_gridworld
+  - travis_wait 60 pytest -s action_state_generation/tests/test_online_train::test_online_train_dqn_rnn_gridworld
+  - travis_wait 60 pytest -s action_state_generation/tests/test_online_train::test_online_train_cartpole
