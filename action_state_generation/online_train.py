@@ -276,13 +276,13 @@ if __name__ == '__main__':
     EPSILON_THRES = 0.4
     TEST_EVERY_EPISODE = 10
     REPLAY_MEMORY_SIZE = 200000
-    NUM_EPISODES = 5001
+    NUM_EPISODES = 2001
     LEARNING_START_EPISODES = 500
     VERBOSE = False
     PLOT = True
 
-    model_str = 'lstm'
-    # model_str = 'dqn'
+    # model_str = 'lstm'
+    model_str = 'dqn'
     env_str = 'finite'
     # env_str = 'rnn'
     # env_str = "lunar"

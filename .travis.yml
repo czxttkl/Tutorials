@@ -6,5 +6,6 @@ python:
 cache: pip
 install:
   - pip install -q -r requirements.txt
+  - pip install pytest-travis-fold
 script:
-  - pytest
+  - travis_wait 60 pytest
