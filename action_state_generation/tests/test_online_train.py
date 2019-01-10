@@ -175,7 +175,7 @@ def test_online_train_cartpole():
 
 if __name__ == "__main__":
     # test_online_train_dqn_gridworld()
-    test_online_train_lstm_gridworld()
-    # test_online_train_lstm_rnn_gridworld()
+    # test_online_train_lstm_gridworld()
+    test_online_train_lstm_rnn_gridworld()
     # test_online_train_dqn_rnn_gridworld()
     # test_online_train_cartpole()
