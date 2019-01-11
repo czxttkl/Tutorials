@@ -7,13 +7,14 @@ import matplotlib.pyplot as plt
 plt.ion()
 
 env = gym.make('LunarLander-v2')
+# env = gym.make('CartPole-v0')
 env.seed(0)
 print('State shape: ', env.observation_space.shape)
 print('Number of actions: ', env.action_space.n)
 
 from dqn_agent import Agent
 
-agent = Agent(state_size=8, action_size=4, seed=0)
+agent = Agent(state_size=env.observation_space.shape[0], action_size=env.action_space.n, seed=0)
 
 
 def train(n_episodes=20000, max_t=1000, eps_start=1.0, eps_end=0.05, eps_decay=0.995):
