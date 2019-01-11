@@ -207,11 +207,11 @@ env.reset()
 #
 
 BATCH_SIZE = 128
-GAMMA = 0.999
+GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
 EPS_DECAY = 200
-TARGET_UPDATE = 10
+TARGET_UPDATE = 2
 
 # Get screen size so that we can initialize layers correctly based on shape
 # returned from AI gym. Typical dimensions at this point are close to 3x40x90
@@ -313,7 +313,7 @@ def optimize_model():
 # duration improvements.
 #
 
-num_episodes = 500
+num_episodes = 50000
 for i_episode in range(num_episodes):
     # Initialize the environment and state
     env.reset()

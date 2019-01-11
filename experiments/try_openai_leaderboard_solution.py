@@ -26,11 +26,11 @@ class DQNSolver:
             max_env_steps=None,
             gamma=1.0,
             epsilon=1.0,
-            epsilon_min=0.2,
+            epsilon_min=0.05,
             epsilon_log_decay=0.995,
             alpha=0.001,
             alpha_decay=0.0,
-            batch_size=256,
+            batch_size=64,
             double_q=True,
             loss='mse',
             monitor=False,
@@ -53,8 +53,8 @@ class DQNSolver:
 
         # Init model
         self.model = Sequential()
-        self.model.add(Dense(100, input_dim=self.env.observation_space.shape[0], activation='tanh'))
-        self.model.add(Dense(100, activation='relu'))
+        self.model.add(Dense(64, input_dim=self.env.observation_space.shape[0], activation='relu'))
+        self.model.add(Dense(64, activation='relu'))
         self.model.add(Dense(self.env.action_space.n, activation='linear'))
         self.model.compile(loss=loss_funcs[loss], optimizer=Adam(lr=self.alpha, decay=self.alpha_decay))
         self.target_model = clone_model(self.model)
@@ -97,6 +97,7 @@ class DQNSolver:
         losses = deque(maxlen=100)
 
         for e in range(self.n_episodes):
+            step = 0
             state = self.preprocess_state(self.env.reset())
             done = False
             accu_reward = 0
@@ -107,27 +108,30 @@ class DQNSolver:
                 self.remember(state, action, reward, next_state, done)
                 state = next_state
                 accu_reward += reward
+                step += 1
 
             final_scores.append(reward)
             accu_scores.append(accu_reward)
             mean_final_score = np.mean(final_scores)
             mean_accu_score = np.mean(accu_scores)
-            num_success= np.sum(np.array(accu_scores) >= self.n_win_ticks)
-            # when ten of episodes achieve good score
+            num_success = np.sum(np.array(accu_scores) >= self.n_win_ticks)
+            # A relaxed condition: when ten of episodes achieve good score
             if num_success > 10:
                 print('Solved after {} trials, score {} ✔'.format(e, accu_reward))
                 return e - 100
 
-            if e % 10 == 0:
+            if e % 2 == 0:
                 self.target_model.set_weights(self.model.get_weights())
 
-            loss = self.replay(self.batch_size)
-            losses.append(loss)
-            mean_loss = np.mean(losses)
+            for _ in range(step // 2):
+                loss = self.replay(self.batch_size)
+                losses.append(loss)
+                mean_loss = np.mean(losses)
 
+            print('\r[Episode {}] - Last 100 episodes final reward: {}, accu reward: {}, loss: {}, # of success: {}'
+                  .format(e, mean_final_score, mean_accu_score, mean_loss, num_success), end='')
             if e % 100 == 0:
-                print('[Episode {}] - Last 100 episodes final reward: {}, accu reward: {}, loss: {}, # of success: {}'
-                      .format(e, mean_final_score, mean_accu_score, mean_loss, num_success))
+                print()
 
         print('Did not solve after {} episodes 😞'.format(e))
         return 9999999999
@@ -135,5 +139,5 @@ class DQNSolver:
 
 if __name__ == '__main__':
     # agent = DQNSolver(env_name='CartPole-v0', gamma=1.0, double_q=False)
-    agent = DQNSolver(env_name='LunarLander-v2', gamma=1.0, double_q=True)
+    agent = DQNSolver(env_name='LunarLander-v2', gamma=0.99, double_q=True)
     agent.run()
