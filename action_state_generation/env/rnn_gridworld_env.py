@@ -222,17 +222,17 @@ class GridWorldEnv:
         return invalid_actions
 
     def print_memory(self, net, i_episode, state, action, invalid_actions,
-                     next_state, reward, last_output, next_invalid_actions,
+                     next_state, reward, done, last_output, next_invalid_actions,
                      epsilon, verbose):
         state_x, state_y = self.state_to_x_y(state)
         text_act = ['L', 'R', 'U', 'D'][action]
-        if next_state is None:
+        if done:
             text_next_state = '     G,  '
         else:
             next_state_x, next_state_y = self.state_to_x_y(next_state)
             text_next_state = (next_state_x, next_state_y), ", "
         # print if verbose=True or verbose=False && terminal state or verbose=False && test
-        if verbose or next_state is None or i_episode == 'test':
+        if verbose or done or i_episode == 'test':
             print('episode',
                   i_episode,
                   'push to mem:',

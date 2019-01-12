@@ -50,17 +50,17 @@ class LunarEnv:
         return []
 
     def print_memory(self, net, i_episode, state, action, invalid_actions,
-                     next_state, reward, last_output, next_invalid_actions,
+                     next_state, reward, done, last_output, next_invalid_actions,
                      epsilon, verbose):
         np.set_printoptions(precision=2)
         text_act = 'ACT' + str(action)
-        if next_state is None:
+        if done:
             text_next_state = '   G'
         else:
 
             text_next_state = str(next_state)
         # print if verbose=True or verbose=False && terminal state or verbose=False && test (i_episode == 'test')
-        if verbose or next_state is None:
+        if verbose or done:
             print("episode {} push to mem: {}, next_state: {}, {}, reward: {}, eps: {}, mem size: {}"
                   .format(i_episode,
                           state,

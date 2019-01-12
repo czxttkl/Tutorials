@@ -9,23 +9,15 @@ from plot_helper.plot_helper import plot_seaborn
 
 from model.lstm import LSTM
 from model.dqn import DQN
+from helper.helper import(
+    get_model, adjust_epsilon, soft_update, get_env
+)
 
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'invalid_actions', 'next_state', 'reward'))
-
-
-def adjust_epsilon(cur_episode, final_episode, learning_start_episodes, epsilon_thres):
-    if cur_episode < learning_start_episodes:
-        # make policy network select random actions
-        return 1
-    temp_epsilon = (0.99 ** (cur_episode - learning_start_episodes)) * 0.5
-    if temp_epsilon < epsilon_thres:
-        return epsilon_thres
-    else:
-        return temp_epsilon
 
 
 def test(env, gamma, i_train_episode, policy_net, verbose):
@@ -61,6 +53,7 @@ def test(env, gamma, i_train_episode, policy_net, verbose):
             invalid_actions,
             next_state,
             reward,
+            done,
             last_output,
             next_invalid_actions,
             0,  # epsilon
@@ -95,51 +88,12 @@ def train(model_str, env_str, test_times, batch_size, gamma, test_every_episode,
     test_episode_durations = []
     test_episode_rewards = []
 
-    if env_str == 'finite':
-        from env.finite_gridworld_env import GridWorldEnv
-        env = GridWorldEnv(device)
-    elif env_str == 'rnn':
-        from env.rnn_gridworld_env import GridWorldEnv
-        env = GridWorldEnv(device)
-    elif env_str == 'lunar':
-        from env.lunar_env import LunarEnv
-        env = LunarEnv(device)
-    elif env_str == 'cartpole':
-        from env.cartpole_env import CartPoleEnv
-        env = CartPoleEnv(device)
-
-    if model_str == 'lstm':
-        lstm_input_dim = lstm_output_dim = env.action_dim
-        lstm_hidden_dim = 50
-        lstm_num_layer = 2
-        policy_net = LSTM(lstm_input_dim, lstm_num_layer,
-                          lstm_hidden_dim, lstm_output_dim,
-                          gamma, replay_memory_size, batch_size)\
-                     .to(device)
-        target_net = None
-    elif model_str == 'dqn':
-        dqn_input_dim = env.state_dim
-        dqn_hidden_dim = 64
-        dqn_num_layer = 2
-        dqn_output_dim = env.action_dim
-        parametric = True
-        policy_net = DQN(dqn_input_dim, dqn_num_layer,
-                         dqn_hidden_dim, dqn_output_dim,
-                         parametric, gamma, replay_memory_size,
-                         batch_size).to(device)
-        # target_net = None
-        target_net = DQN(dqn_input_dim, dqn_num_layer,
-                         dqn_hidden_dim, dqn_output_dim,
-                         parametric, gamma, replay_memory_size,
-                         batch_size).to(device)
-        target_net.load_state_dict(policy_net.state_dict())
-        target_net.eval()
-    else:
-        raise Exception
+    env = get_env(env_str, device)
+    policy_net, target_net = get_model(model_str, env, gamma, replay_memory_size, batch_size, device)
 
     print(policy_net)
     print("trainable param num:", policy_net.num_of_params())
-    policy_net.optimizer = optim.RMSprop(policy_net.parameters())
+    policy_net.optimizer = optim.Adam(policy_net.parameters())
 
     for i_episode in range(num_episodes):
         # Initialize the environment and state
@@ -178,6 +132,7 @@ def train(model_str, env_str, test_times, batch_size, gamma, test_every_episode,
                 invalid_actions,
                 next_state,
                 reward,
+                done,
                 last_output,
                 next_invalid_actions,
                 epsilon,
@@ -199,10 +154,6 @@ def train(model_str, env_str, test_times, batch_size, gamma, test_every_episode,
         # Store the episode transitions in memory
         policy_net.memory.push(episode_memory)
 
-        # perform target network update
-        if i_episode % target_update_every_episode == 0 and target_net:
-                target_net.load_state_dict(policy_net.state_dict())
-
         # perform test
         if i_episode % test_every_episode == 0:
             results = [test(env, gamma, i_episode, policy_net, verbose) for _ in range(test_times)]
@@ -213,6 +164,10 @@ def train(model_str, env_str, test_times, batch_size, gamma, test_every_episode,
             print(test_episode_durations)
             print(test_episode_rewards)
             print("-------------test at {} train episode------------".format(i_episode))
+
+        # perform target network update
+        if i_episode % target_update_every_episode == 0 and target_net:
+            soft_update(policy_net, target_net, 1)
 
         # Perform one step of the optimization
         if i_episode > learning_start_episodes:
@@ -281,7 +236,7 @@ if __name__ == '__main__':
     EPSILON_THRES = 0.05
     TEST_EVERY_EPISODE = 100
     TARGET_UPDATE_EVERY_EPISODE = 2
-    REPLAY_MEMORY_SIZE = 200000
+    REPLAY_MEMORY_SIZE = int(1e5)
     NUM_EPISODES = 20001
     LEARNING_START_EPISODES = 0
     VERBOSE = False
