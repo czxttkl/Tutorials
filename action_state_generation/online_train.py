@@ -16,8 +16,10 @@ from helper.helper import(
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'invalid_actions', 'next_state', 'reward'))
+Transition = namedtuple(
+    'Transition',
+    ('state', 'action', 'invalid_actions', 'next_state', 'reward', 'done')
+)
 
 
 def test(env, gamma, i_train_episode, policy_net, verbose):
@@ -121,9 +123,6 @@ def train(model_str, env_str, test_times, batch_size, gamma, test_every_episode,
             # needs to compute Q(s',a) for all a, which will be used in the next iteration
             last_output = policy_net.output(env, action, next_state)
 
-            if done:
-                next_state = None
-
             env.print_memory(
                 policy_net,
                 i_episode,
@@ -140,7 +139,7 @@ def train(model_str, env_str, test_times, batch_size, gamma, test_every_episode,
             )
 
             step_transition = Transition(state=state, action=action, invalid_actions=invalid_actions,
-                                         next_state=next_state, reward=reward)
+                                         next_state=next_state, reward=reward, done=done)
             episode_memory.append(step_transition)
 
             # Move to the next state

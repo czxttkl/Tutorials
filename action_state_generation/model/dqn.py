@@ -93,28 +93,26 @@ class DQN(nn.Module):
         state_batch = torch.cat([env.state_to_state_vec_dqn(t.state) for t in transitions])
         action_batch = torch.cat([torch.tensor([[t.action]], dtype=torch.long) for t in transitions])
         reward_batch = torch.cat([t.reward for t in transitions])
+        done_batch = torch.cat([torch.tensor([t.done], dtype=torch.float) for t in transitions])
 
         next_state_batch = torch.zeros([BATCH_SIZE, state_batch.size()[1]], dtype=torch.float)
-        non_final_mask = torch.zeros([BATCH_SIZE, self.dqn_output_dim], dtype=torch.float)
         valid_action_masks = torch.ones([BATCH_SIZE, self.dqn_output_dim])
 
         for i, t in enumerate(transitions):
-            if t.next_state is not None:
-                non_final_mask[i, :] = 1
+            if t.done != 1:
                 next_state_batch[i, :] = env.state_to_state_vec_dqn(t.next_state)
                 inv_acts = env.invalid_actions_by_state(t.next_state)
                 valid_action_masks[i, inv_acts] = 0
 
         # Compute Q(s_{t+1}, a)
         if target_net:
-            next_state_full_values = target_net(next_state_batch)
+            next_state_full_values = target_net(next_state_batch).detach()
         else:
-            next_state_full_values = self(next_state_batch)
-        next_state_full_values *= non_final_mask
+            next_state_full_values = self(next_state_batch).detach()
         next_state_full_values *= valid_action_masks
         next_state_max_values = next_state_full_values.max(1)[0].detach()
         # Compute the expected Q values
-        expected_state_action_values = (next_state_max_values * self.gamma) + reward_batch
+        expected_state_action_values = (next_state_max_values * self.gamma * (1 - done_batch)) + reward_batch
         # expected_state_action_values = expected_state_action_values.detach().numpy()
         # expected_state_action_values = torch.from_numpy(expected_state_action_values)
 

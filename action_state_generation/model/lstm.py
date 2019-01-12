@@ -165,7 +165,7 @@ class LSTM(nn.Module):
 
         # Compute Huber loss
         loss = F.smooth_l1_loss(cur_state_action_values, expected_state_action_values.detach())
-        print('loss:', loss.item())
+        print('\rloss:', loss.item(), end='')
 
         # Optimize the model
         self.optimizer.zero_grad()
