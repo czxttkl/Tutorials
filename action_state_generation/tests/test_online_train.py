@@ -8,6 +8,7 @@ from online_train import train_main
 
 def test_online_train_dqn_gridworld():
     TRAIN_TIMES = 1
+    TEST_TIMES = 1
     BATCH_SIZE = 4
     GAMMA = 0.9
     EPSILON_THRES = 0.4
@@ -15,6 +16,7 @@ def test_online_train_dqn_gridworld():
     REPLAY_MEMORY_SIZE = 20000
     NUM_EPISODES = 2001
     LEARNING_START_EPISODES = 500
+    TARGET_UPDATE_EVERY_EPISODE = 2
     VERBOSE = False
     PLOT = False
 
@@ -25,6 +27,7 @@ def test_online_train_dqn_gridworld():
         model_str,
         env_str,
         TRAIN_TIMES,
+        TEST_TIMES,
         BATCH_SIZE,
         GAMMA,
         TEST_EVERY_EPISODE,
@@ -32,6 +35,7 @@ def test_online_train_dqn_gridworld():
         NUM_EPISODES,
         LEARNING_START_EPISODES,
         EPSILON_THRES,
+        TARGET_UPDATE_EVERY_EPISODE,
         VERBOSE,
         PLOT,
     )
@@ -42,6 +46,7 @@ def test_online_train_dqn_gridworld():
 
 def test_online_train_lstm_gridworld():
     TRAIN_TIMES = 1
+    TEST_TIMES = 1
     BATCH_SIZE = 4
     GAMMA = 0.9
     EPSILON_THRES = 0.4
@@ -49,6 +54,7 @@ def test_online_train_lstm_gridworld():
     REPLAY_MEMORY_SIZE = 20000
     NUM_EPISODES = 4001
     LEARNING_START_EPISODES = 500
+    TARGET_UPDATE_EVERY_EPISODE = 2
     VERBOSE = False
     PLOT = False
 
@@ -59,6 +65,7 @@ def test_online_train_lstm_gridworld():
         model_str,
         env_str,
         TRAIN_TIMES,
+        TEST_TIMES,
         BATCH_SIZE,
         GAMMA,
         TEST_EVERY_EPISODE,
@@ -66,6 +73,7 @@ def test_online_train_lstm_gridworld():
         NUM_EPISODES,
         LEARNING_START_EPISODES,
         EPSILON_THRES,
+        TARGET_UPDATE_EVERY_EPISODE,
         VERBOSE,
         PLOT,
     )
@@ -76,6 +84,7 @@ def test_online_train_lstm_gridworld():
 
 def test_online_train_lstm_rnn_gridworld():
     TRAIN_TIMES = 1
+    TEST_TIMES = 1
     BATCH_SIZE = 4
     GAMMA = 0.9
     EPSILON_THRES = 0.4
@@ -83,6 +92,7 @@ def test_online_train_lstm_rnn_gridworld():
     REPLAY_MEMORY_SIZE = 20000
     NUM_EPISODES = 5001
     LEARNING_START_EPISODES = 500
+    TARGET_UPDATE_EVERY_EPISODE = 2
     VERBOSE = True
     PLOT = False
 
@@ -93,6 +103,7 @@ def test_online_train_lstm_rnn_gridworld():
         model_str,
         env_str,
         TRAIN_TIMES,
+        TEST_TIMES,
         BATCH_SIZE,
         GAMMA,
         TEST_EVERY_EPISODE,
@@ -100,6 +111,7 @@ def test_online_train_lstm_rnn_gridworld():
         NUM_EPISODES,
         LEARNING_START_EPISODES,
         EPSILON_THRES,
+        TARGET_UPDATE_EVERY_EPISODE,
         VERBOSE,
         PLOT,
     )
@@ -109,6 +121,7 @@ def test_online_train_lstm_rnn_gridworld():
 
 def test_online_train_dqn_rnn_gridworld():
     TRAIN_TIMES = 1
+    TEST_TIMES = 1
     BATCH_SIZE = 4
     GAMMA = 0.9
     EPSILON_THRES = 0.4
@@ -116,6 +129,7 @@ def test_online_train_dqn_rnn_gridworld():
     REPLAY_MEMORY_SIZE = 20000
     NUM_EPISODES = 5001
     LEARNING_START_EPISODES = 500
+    TARGET_UPDATE_EVERY_EPISODE = 2
     VERBOSE = False
     PLOT = False
 
@@ -126,6 +140,7 @@ def test_online_train_dqn_rnn_gridworld():
         model_str,
         env_str,
         TRAIN_TIMES,
+        TEST_TIMES,
         BATCH_SIZE,
         GAMMA,
         TEST_EVERY_EPISODE,
@@ -133,6 +148,7 @@ def test_online_train_dqn_rnn_gridworld():
         NUM_EPISODES,
         LEARNING_START_EPISODES,
         EPSILON_THRES,
+        TARGET_UPDATE_EVERY_EPISODE,
         VERBOSE,
         PLOT,
     )
@@ -140,8 +156,9 @@ def test_online_train_dqn_rnn_gridworld():
     assert np.sum(test_rewards_ave[-10:] > 31) == 0
 
 
-def test_online_train_cartpole():
+def test_online_train_dqn_cartpole():
     TRAIN_TIMES = 1
+    TEST_TIMES = 1
     BATCH_SIZE = 1000
     GAMMA = 0.9
     EPSILON_THRES = 0.05
@@ -149,6 +166,7 @@ def test_online_train_cartpole():
     REPLAY_MEMORY_SIZE = 20000
     NUM_EPISODES = 2001
     LEARNING_START_EPISODES = 500
+    TARGET_UPDATE_EVERY_EPISODE = 2
     VERBOSE = False
     PLOT = False
 
@@ -159,6 +177,7 @@ def test_online_train_cartpole():
         model_str,
         env_str,
         TRAIN_TIMES,
+        TEST_TIMES,
         BATCH_SIZE,
         GAMMA,
         TEST_EVERY_EPISODE,
@@ -166,6 +185,7 @@ def test_online_train_cartpole():
         NUM_EPISODES,
         LEARNING_START_EPISODES,
         EPSILON_THRES,
+        TARGET_UPDATE_EVERY_EPISODE,
         VERBOSE,
         PLOT,
     )
@@ -174,8 +194,8 @@ def test_online_train_cartpole():
 
 
 if __name__ == "__main__":
-    # test_online_train_dqn_gridworld()
+    test_online_train_dqn_gridworld()
     # test_online_train_lstm_gridworld()
-    test_online_train_lstm_rnn_gridworld()
+    # test_online_train_lstm_rnn_gridworld()
     # test_online_train_dqn_rnn_gridworld()
-    # test_online_train_cartpole()
+    # test_online_train_dqn_cartpole()

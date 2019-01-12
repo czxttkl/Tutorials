@@ -59,8 +59,8 @@ class LunarEnv:
         else:
 
             text_next_state = str(next_state)
-        # print if verbose=True or verbose=False && terminal state or verbose=False && test
-        if verbose or next_state is None or i_episode == 'test':
+        # print if verbose=True or verbose=False && terminal state or verbose=False && test (i_episode == 'test')
+        if verbose or next_state is None:
             print("episode {} push to mem: {}, next_state: {}, {}, reward: {}, eps: {}, mem size: {}"
                   .format(i_episode,
                           state,

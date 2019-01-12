@@ -87,7 +87,8 @@ class LSTM(nn.Module):
     def select_action(self, env, step, state, last_lstm_output, invalid_actions, action_dim, eps_thres):
         """ return action vector and action type accepted by env"""
         sample = random.random()
-        # the first action is randomly selected
+        # the first action is randomly selected, because there is no previous action
+        # to feed LSTM
         if step == 0:
             action = random.randrange(action_dim)
             while action in invalid_actions:

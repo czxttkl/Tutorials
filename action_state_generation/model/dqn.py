@@ -39,9 +39,9 @@ class DQN(nn.Module):
                  parametric, gamma, replay_memory_size, training_batch_size):
         super(DQN, self).__init__()
         h_sizes = [dqn_input_dim] + [dqn_hidden_dim] * dqn_num_layer + [dqn_output_dim]
-        self.hidden = nn.ModuleList()
+        self.layers = nn.ModuleList()
         for k in range(len(h_sizes) - 1):
-            self.hidden.append(nn.Linear(h_sizes[k], h_sizes[k + 1]))
+            self.layers.append(nn.Linear(h_sizes[k], h_sizes[k + 1]))
 
         self.memory = DQN.ReplayMemory(replay_memory_size)
 
@@ -58,9 +58,9 @@ class DQN(nn.Module):
     def forward(self, x):
         for i in range(self.dqn_num_layer + 1):
             if i == self.dqn_num_layer:
-                x = self.hidden[i](x)
+                x = self.layers[i](x)
             else:
-                x = F.relu(self.hidden[i](x))
+                x = F.relu(self.layers[i](x))
         return x
 
     def init_hidden(self, batch_size):
@@ -71,18 +71,13 @@ class DQN(nn.Module):
 
     def select_action(self, env, step, state, last_output, invalid_actions, action_dim, eps_thres):
         sample = random.random()
-        # the first action is randomly selected
-        if step == 0:
-            action = random.randrange(action_dim)
-            while action in invalid_actions:
-                action = random.randrange(action_dim)
-        # greedy-epsilon
-        elif sample > eps_thres:
+        if sample > eps_thres:
+            self.eval()
             with torch.no_grad():
-                # action_output = self(env.state_to_state_vec_dqn(state))
-                action_output = last_output
+                action_output = self(env.state_to_state_vec_dqn(state))
                 action_output[0, invalid_actions] = -999999.9
                 action = action_output.max(1)[1].detach().item()
+            self.train()
         else:
             action = random.randrange(action_dim)
             while action in invalid_actions:
@@ -127,17 +122,16 @@ class DQN(nn.Module):
         if self.parametric:
             # Compute Q(s_t, a) - the model computes Q(s_t), then we select the columns of actions taken
             state_action_values = self(state_batch).gather(1, action_batch)
-            # Compute Huber loss
-            loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+            loss = F.mse_loss(state_action_values, expected_state_action_values.unsqueeze(1))
         else:
             state_full_values = self(state_batch)
             state_full_values_to_fit = state_full_values.clone().detach()
             state_full_values_to_fit[list(range(BATCH_SIZE)), action_batch.squeeze()] = expected_state_action_values
             # Compute MSE loss
-            loss = F.smooth_l1_loss(state_full_values, state_full_values_to_fit)
+            loss = F.mse_loss(state_full_values, state_full_values_to_fit)
 
         # Optimize the model
-        print('loss:', loss.item())
+        print('\rloss:', loss.item(), end='')
         self.optimizer.zero_grad()
         loss.backward()
         for param in self.parameters():
@@ -148,4 +142,8 @@ class DQN(nn.Module):
         """ output Q(s',a) for all a """
         # return self(next_state[:, :-1])
         next_state_vec = env.state_to_state_vec_dqn(next_state)
-        return self(next_state_vec)
+        self.eval()
+        with torch.no_grad():
+            output = self(next_state_vec)
+        self.train()
+        return output

@@ -88,9 +88,9 @@ def test(env, gamma, i_train_episode, policy_net, verbose):
     return duration, np.round(final_accumulated_reward, 2)
 
 
-def train(model_str, env_str, batch_size, gamma, test_every_episode,
+def train(model_str, env_str, test_times, batch_size, gamma, test_every_episode,
           replay_memory_size, num_episodes, learning_start_episodes,
-          epsilon_thres, verbose):
+          target_update_every_episode, epsilon_thres, verbose):
     episode_durations = []
     test_episode_durations = []
     test_episode_rewards = []
@@ -119,10 +119,10 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
         target_net = None
     elif model_str == 'dqn':
         dqn_input_dim = env.state_dim
-        dqn_hidden_dim = 168
+        dqn_hidden_dim = 64
         dqn_num_layer = 2
         dqn_output_dim = env.action_dim
-        parametric = False
+        parametric = True
         policy_net = DQN(dqn_input_dim, dqn_num_layer,
                          dqn_hidden_dim, dqn_output_dim,
                          parametric, gamma, replay_memory_size,
@@ -199,12 +199,13 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
         # Store the episode transitions in memory
         policy_net.memory.push(episode_memory)
 
-        # perform test and target network update
-        if i_episode % test_every_episode == 0:
-            if target_net:
+        # perform target network update
+        if i_episode % target_update_every_episode == 0 and target_net:
                 target_net.load_state_dict(policy_net.state_dict())
 
-            results = [test(env, gamma, i_episode, policy_net, verbose) for _ in range(1)]
+        # perform test
+        if i_episode % test_every_episode == 0:
+            results = [test(env, gamma, i_episode, policy_net, verbose) for _ in range(test_times)]
             test_duration, final_test_reward = np.mean([r[0] for r in results]), np.mean([r[1] for r in results])
             test_episode_durations.append(test_duration)
             test_episode_rewards.append(final_test_reward)
@@ -215,23 +216,26 @@ def train(model_str, env_str, batch_size, gamma, test_every_episode,
 
         # Perform one step of the optimization
         if i_episode > learning_start_episodes:
-            policy_net.optimize_model(env, target_net)
+            for _ in range(t // target_update_every_episode):
+                policy_net.optimize_model(env, target_net)
 
     print('Complete Training')
     return test_episode_durations, test_episode_rewards
 
 
-def train_main(model_str, env_str, train_times, batch_size, gamma,
+def train_main(model_str, env_str, train_times, test_times,
+               batch_size, gamma,
                test_every_episode, replay_memory_size,
                num_episodes, learning_start_episodes,
-               epsilon_thres, verbose, plot):
+               epsilon_thres, target_update_every_episode, verbose, plot):
     test_durations = []
     test_rewards = []
     for i in range(train_times):
         duration, reward = train(
-            model_str, env_str, batch_size, gamma,
+            model_str, env_str, test_times, batch_size, gamma,
             test_every_episode, replay_memory_size, num_episodes,
-            learning_start_episodes, epsilon_thres, verbose)
+            learning_start_episodes, target_update_every_episode,
+            epsilon_thres, verbose)
         test_durations.append(duration)
         test_rewards.append(reward)
 
@@ -270,28 +274,31 @@ def train_main(model_str, env_str, train_times, batch_size, gamma,
 
 
 if __name__ == '__main__':
-    TRAIN_TIMES = 5
-    BATCH_SIZE = 4
-    GAMMA = 0.9
-    EPSILON_THRES = 0.4
-    TEST_EVERY_EPISODE = 10
+    TRAIN_TIMES = 1
+    TEST_TIMES = 100
+    BATCH_SIZE = 64
+    GAMMA = 0.99
+    EPSILON_THRES = 0.05
+    TEST_EVERY_EPISODE = 100
+    TARGET_UPDATE_EVERY_EPISODE = 2
     REPLAY_MEMORY_SIZE = 200000
-    NUM_EPISODES = 2001
-    LEARNING_START_EPISODES = 500
+    NUM_EPISODES = 20001
+    LEARNING_START_EPISODES = 0
     VERBOSE = False
     PLOT = True
 
     # model_str = 'lstm'
     model_str = 'dqn'
-    env_str = 'finite'
+    # env_str = 'finite'
     # env_str = 'rnn'
-    # env_str = "lunar"
+    env_str = "lunar"
     # env_str = "cartpole"
 
     train_main(
         model_str,
         env_str,
         TRAIN_TIMES,
+        TEST_TIMES,
         BATCH_SIZE,
         GAMMA,
         TEST_EVERY_EPISODE,
@@ -299,6 +306,7 @@ if __name__ == '__main__':
         NUM_EPISODES,
         LEARNING_START_EPISODES,
         EPSILON_THRES,
+        TARGET_UPDATE_EVERY_EPISODE,
         VERBOSE,
         PLOT,
     )
