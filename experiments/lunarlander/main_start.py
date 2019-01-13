@@ -6,11 +6,6 @@ import torch.optim as optim
 from collections import deque
 import matplotlib.pyplot as plt
 plt.ion()
-import sys
-import os
-myPath = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, myPath + '/../../action_state_generation/model')
-from dqn import DQN
 from dqn_agent import Agent, ReplayBuffer
 
 env = gym.make('LunarLander-v2')
@@ -19,14 +14,7 @@ env.seed(0)
 print('State shape: ', env.observation_space.shape)
 print('Number of actions: ', env.action_space.n)
 
-
-agent = DQN(env.observation_space.shape[0], 2,
-            64, env.action_space.n, True, 0.99, int(1e5), 64)
-agent.memory = ReplayBuffer(env.action_space.n, int(1e5), 64, 0)
-agent.env = env
-agent.t_step = 0
-agent.optimizer = optim.Adam(agent.parameters())
-# agent = Agent(state_size=env.observation_space.shape[0], action_size=env.action_space.n, seed=0)
+agent = Agent(state_size=env.observation_space.shape[0], action_size=env.action_space.n, seed=0)
 
 
 def train(n_episodes=20000, max_t=1000, eps_start=1.0, eps_end=0.05, eps_decay=0.995):
