@@ -170,8 +170,6 @@ class LSTM(nn.Module):
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
-        for param in self.parameters():
-            param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
     def output(self, env, action, next_state):

@@ -132,8 +132,6 @@ class DQN(nn.Module):
         print('\rloss:', loss.item(), end='')
         self.optimizer.zero_grad()
         loss.backward()
-        for param in self.parameters():
-            param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
     def output(self, env, action, next_state):
@@ -145,3 +143,74 @@ class DQN(nn.Module):
             output = self(next_state_vec)
         self.train()
         return output
+
+    # use for test
+    def act(self, state, eps=0.):
+        """Returns actions for given state as per current policy.
+
+        Params
+        ======
+            state (array_like): current state
+            eps (float): epsilon, for epsilon-greedy action selection
+        """
+        state = torch.from_numpy(state).unsqueeze(0).float()
+        sample = random.random()
+        if sample > eps:
+            self.eval()
+            with torch.no_grad():
+                action_output = self(state)
+                action_output[0, []] = -999999.9
+                action = action_output.max(1)[1].detach().item()
+            self.train()
+        else:
+            action = random.randrange(self.dqn_output_dim)
+            while action in []:
+                action = random.randrange(self.dqn_output_dim)
+        return action
+
+    def step(self, state, action, reward, next_state, done):
+        SOFT_UPDATE_EVERY = 2
+        BATCH_SIZE = 64
+        GAMMA = 0.99
+        TAU = 1
+        # Learn every UPDATE_EVERY time steps.
+        # self.t_step = (self.t_step + 1) % LEARN_EVERY
+        # if self.t_step == 0:
+        self.t_step += 1
+        if done:
+            for _ in range(self.t_step // SOFT_UPDATE_EVERY):
+                # If enough samples are available in memory, get random subset and learn
+                if len(self.memory) > BATCH_SIZE:
+                    experiences = self.memory.sample()
+                    # self.learn_DDQN(experiences, GAMMA)
+                    self.learn(experiences, GAMMA)
+            self.t_step = 0
+
+    def learn(self, experiences, gamma):
+        BATCH_SIZE = 64
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch = experiences
+        valid_action_masks = torch.ones([BATCH_SIZE, self.dqn_output_dim])
+
+        for i, next_state in enumerate(done_batch):
+            inv_acts = []
+            valid_action_masks[i, inv_acts] = 0
+
+        next_state_full_values = self(next_state_batch).detach()
+        next_state_full_values *= valid_action_masks
+        next_state_max_values = next_state_full_values.max(1)[0].detach().unsqueeze(1)
+        # Compute the expected Q values
+        expected_state_action_values = (next_state_max_values * self.gamma * (1 - done_batch)) + reward_batch
+        # expected_state_action_values = expected_state_action_values.detach().numpy()
+        # expected_state_action_values = torch.from_numpy(expected_state_action_values)
+
+        # if parametric is True, only fit the q-values of the states/actions that have been visited
+        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the columns of actions taken
+        state_action_values = self(state_batch).gather(1, action_batch)
+        loss = F.mse_loss(state_action_values, expected_state_action_values)
+        # Optimize the model
+        print('loss:', loss.item())
+        self.optimizer.zero_grad()
+        loss.backward()
+        # for param in self.parameters():
+        #     param.grad.data.clamp_(-1, 1)
+        self.optimizer.step()

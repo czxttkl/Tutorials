@@ -229,7 +229,7 @@ def train_main(model_str, env_str, train_times, test_times,
 
 if __name__ == '__main__':
     TRAIN_TIMES = 1
-    TEST_TIMES = 100
+    TEST_TIMES = 20
     BATCH_SIZE = 64
     GAMMA = 0.99
     EPSILON_THRES = 0.05

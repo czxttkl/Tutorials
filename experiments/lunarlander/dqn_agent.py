@@ -36,19 +36,14 @@ class Agent():
 
         # Q-Network
         self.qnetwork_local = QNetwork(state_size, action_size, seed).to(device)
-        self.qnetwork_target = QNetwork(state_size, action_size, seed).to(device)
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
 
         # Replay memory
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
         # Initialize time step (for updating every LEARN_EVERY steps)
         self.t_step = 0
-        self.t_episode = 0
-    
-    def step(self, state, action, reward, next_state, done):
-        # Save experience in replay memory
-        self.memory.add(state, action, reward, next_state, done)
 
+    def step(self, state, action, reward, next_state, done):
         # Learn every UPDATE_EVERY time steps.
         # self.t_step = (self.t_step + 1) % LEARN_EVERY
         # if self.t_step == 0:
@@ -60,10 +55,6 @@ class Agent():
                     experiences = self.memory.sample()
                     # self.learn_DDQN(experiences, GAMMA)
                     self.learn(experiences, GAMMA)
-        if done:
-            self.t_episode += 1
-            if self.t_episode % SOFT_UPDATE_EVERY == 0:
-                self.soft_update(self.qnetwork_local, self.qnetwork_target, TAU)
             self.t_step = 0
 
     def act(self, state, eps=0.):
@@ -109,19 +100,6 @@ class Agent():
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
-    def soft_update(self, local_model, target_model, tau):
-        """Soft update model parameters.
-        θ_target = τ*θ_local + (1 - τ)*θ_target
-
-        Params
-        ======
-            local_model (PyTorch model): weights will be copied from
-            target_model (PyTorch model): weights will be copied to
-            tau (float): interpolation parameter 
-        """
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
 
 class ReplayBuffer:
