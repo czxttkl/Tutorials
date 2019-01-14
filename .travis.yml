@@ -13,11 +13,11 @@ install:
   - pip install pytest-travis-fold
 script:
   - pytest lstm_reward_function/tests --cov=lstm_reward_function/
-  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_gridworld
-  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_lstm_gridworld
-  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_lstm_rnn_gridworld
-  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_rnn_gridworld
-  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_cartpole
-  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_lunar
+  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_gridworld --cov=action_state_generation/
+  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_lstm_gridworld --cov=action_state_generation/
+  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_lstm_rnn_gridworld --cov=action_state_generation/
+  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_rnn_gridworld --cov=action_state_generation/
+  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_cartpole --cov=action_state_generation/
+  - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_lunar --cov=action_state_generation/
 after_success:
   - coveralls
