@@ -2,3 +2,7 @@
 .idea
 *.DS_Store
 *.png
+*.json
+experiments/*/*.npz
+experiments/world-models_reproduce/datasets
+experiments/world-models_reproduce/output_models
