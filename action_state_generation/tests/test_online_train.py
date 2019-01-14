@@ -190,7 +190,7 @@ def test_online_train_dqn_cartpole():
         PLOT,
     )
     # cartpole is a little special, we only need at least 1 test optimal
-    assert np.sum(np.array(test_rewards_ave) > 195) > 0
+    assert np.sum(np.array(test_rewards_ave) > 190) > 0
 
 
 def test_online_train_dqn_lunar():
@@ -226,7 +226,7 @@ def test_online_train_dqn_lunar():
         VERBOSE,
         PLOT,
     )
-    assert np.sum(np.array(test_rewards_ave) > 195) > 0
+    assert np.sum(np.array(test_rewards_ave) > 190) > 0
 
 
 if __name__ == "__main__":
