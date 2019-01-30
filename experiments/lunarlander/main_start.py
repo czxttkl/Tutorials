@@ -1,14 +1,12 @@
 import gym
-import random
-import torch
 import numpy as np
-import torch.optim as optim
 from collections import deque
 import matplotlib.pyplot as plt
 plt.ion()
 from dqn_agent import Agent, ReplayBuffer
 
 env = gym.make('LunarLander-v2')
+# cartpole may not reach 200 but can reach > 190
 # env = gym.make('CartPole-v0')
 env.seed(0)
 print('State shape: ', env.observation_space.shape)

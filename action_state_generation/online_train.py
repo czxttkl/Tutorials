@@ -7,8 +7,6 @@ import torch.optim as optim
 import pandas as pd
 from plot_helper.plot_helper import plot_seaborn
 
-from model.lstm import LSTM
-from model.dqn import DQN
 from helper.helper import(
     get_model, adjust_epsilon, soft_update, get_env
 )
@@ -245,8 +243,8 @@ if __name__ == '__main__':
     model_str = 'dqn'
     # env_str = 'finite'
     # env_str = 'rnn'
-    env_str = "lunar"
-    # env_str = "cartpole"
+    # env_str = "lunar"
+    env_str = "cartpole"
 
     train_main(
         model_str,

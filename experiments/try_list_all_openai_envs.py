@@ -11,8 +11,8 @@ for d in envs.registry.all():
         print("observation space shape", env.observation_space.shape)
         if env_id == 'CartPole-v0':
             print('a')
-        if env.observation_space.shape is None:
-            print('b')
+        if isinstance(env.action_space,  gym.spaces.Box):
+            env.action_space.sample()
     except:
         print("not successful")
     print()
