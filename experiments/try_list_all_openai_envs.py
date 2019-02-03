@@ -9,10 +9,13 @@ for d in envs.registry.all():
         print("action space", env.action_space)
         print("observation space", env.observation_space)
         print("observation space shape", env.observation_space.shape)
-        if env_id == 'CartPole-v0':
-            print('a')
-        if isinstance(env.action_space,  gym.spaces.Box):
-            env.action_space.sample()
+        if isinstance(env.action_space,  gym.spaces.Discrete) \
+                and isinstance(env.observation_space,  gym.spaces.Box)\
+                and len(env.observation_space.shape) == 1:
+            print('-----good-----')
+            print(env.action_space.sample())
+            print(env.observation_space.sample())
+            print('-------------')
     except:
         print("not successful")
     print()

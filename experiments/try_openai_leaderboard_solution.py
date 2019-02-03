@@ -1,3 +1,8 @@
+"""
+what is special about this solution is that:
+1. it uses Keras
+2. it fits Q-values for all actions but not only the action taken
+"""
 import random
 import gym
 import math
