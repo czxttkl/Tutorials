@@ -72,5 +72,5 @@ def test_offline_train_dqn_cartpole():
 
 
 if __name__ == "__main__":
-    # test_offline_train_dqn_cartpole()
-    test_offline_train_dqn_gridworld()
+    test_offline_train_dqn_cartpole()
+    # test_offline_train_dqn_gridworld()

@@ -20,7 +20,7 @@ from models.vae import VAE
 from models.mdrnn import MDRNN, gmm_loss
 
 parser = argparse.ArgumentParser("MDRNN training")
-parser.add_argument('--logdir', type=str,
+parser.add_argument('--logdir', type=str, default='output_models',
                     help="Where things are logged and models are loaded from.")
 parser.add_argument('--noreload', action='store_true',
                     help="Do not reload if specified.")
@@ -29,9 +29,9 @@ args = parser.parse_args()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # constants
-BSIZE = 16
+BSIZE = 121
 SEQ_LEN = 32
-epochs = 30
+epochs = 1
 
 # Loading VAE
 vae_file = join(args.logdir, 'vae', 'best.tar')
@@ -73,11 +73,29 @@ if exists(rnn_file) and not args.noreload:
 transform = transforms.Lambda(
     lambda x: np.transpose(x, (0, 3, 1, 2)) / 255)
 train_loader = DataLoader(
-    RolloutSequenceDataset('datasets/carracing', SEQ_LEN, transform, buffer_size=30),
-    batch_size=BSIZE, num_workers=8, shuffle=True)
+    RolloutSequenceDataset(
+        'datasets/carracing',
+        SEQ_LEN,
+        transform,
+        train_size=1,
+        buffer_size=30,
+        train=True,),
+    batch_size=BSIZE,
+    num_workers=8,
+    shuffle=True,
+)
 test_loader = DataLoader(
-    RolloutSequenceDataset('datasets/carracing', SEQ_LEN, transform, train=False, buffer_size=10),
-    batch_size=BSIZE, num_workers=8)
+    RolloutSequenceDataset(
+        'datasets/carracing',
+        SEQ_LEN,
+        transform,
+        train_size=1,
+        buffer_size=10,
+        train=False,
+    ),
+    batch_size=BSIZE,
+    num_workers=8,
+)
 
 def to_latent(obs, next_obs):
     """ Transform observations to latent space.
@@ -89,15 +107,25 @@ def to_latent(obs, next_obs):
         - latent_obs: 4D torch tensor (BSIZE, SEQ_LEN, LSIZE)
         - next_latent_obs: 4D torch tensor (BSIZE, SEQ_LEN, LSIZE)
     """
+    # RED_SIZE = reduce size
+    # BSIZE = batch size
+    # SEQ LEN: sequence length
+    # LSIZE: latent size
+
     with torch.no_grad():
+        init_obs_size = obs.size()
         obs, next_obs = [
             f.upsample(x.view(-1, 3, SIZE, SIZE), size=RED_SIZE,
                        mode='bilinear', align_corners=True)
             for x in (obs, next_obs)]
 
+        trans_obs_size = obs.size()
         (obs_mu, obs_logsigma), (next_obs_mu, next_obs_logsigma) = [
             vae(x)[1:] for x in (obs, next_obs)]
 
+        obs_mu_size = obs_mu.size()
+        print("\ninit_obs_size: {}, trans_obs_size: {}, obs_mu_size: {}, {}, {}, {}"
+              .format(init_obs_size, trans_obs_size,  obs_mu_size, BSIZE, SEQ_LEN, LSIZE))
         latent_obs, latent_next_obs = [
             (x_mu + x_logsigma.exp() * torch.randn_like(x_mu)).view(BSIZE, SEQ_LEN, LSIZE)
             for x_mu, x_logsigma in
@@ -155,7 +183,7 @@ def data_pass(epoch, train): # pylint: disable=too-many-locals
     pbar = tqdm(total=len(loader.dataset), desc="Epoch {}".format(epoch))
     for i, data in enumerate(loader):
         obs, action, reward, terminal, next_obs = [arr.to(device) for arr in data]
-
+        print(i)
         # transform obs
         latent_obs, latent_next_obs = to_latent(obs, next_obs)
 

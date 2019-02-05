@@ -22,16 +22,16 @@ from utils.misc import flatten_parameters
 
 # parsing
 parser = argparse.ArgumentParser()
-parser.add_argument('--logdir', type=str, help='Where everything is stored.')
+parser.add_argument('--logdir', type=str, help='Where everything is stored.', default='output_models/')
 parser.add_argument('--n-samples', type=int, help='Number of samples used to obtain '
-                    'return estimate.')
-parser.add_argument('--pop-size', type=int, help='Population size.')
+                    'return estimate.', default=4)
+parser.add_argument('--pop-size', type=int, help='Population size.', default=4)
 parser.add_argument('--target-return', type=float, help='Stops once the return '
-                    'gets above target_return')
+                    'gets above target_return', default=950)
 parser.add_argument('--display', action='store_true', help="Use progress bars if "
                     "specified.")
 parser.add_argument('--max-workers', type=int, help='Maximum number of workers.',
-                    default=32)
+                    default=1)
 args = parser.parse_args()
 
 # Max number of workers. M
@@ -82,8 +82,9 @@ def slave_routine(p_queue, r_queue, e_queue, p_index):
     :args p_index: the process index
     """
     # init routine
-    gpu = p_index % torch.cuda.device_count()
-    device = torch.device('cuda:{}'.format(gpu) if torch.cuda.is_available() else 'cpu')
+    # gpu = p_index % torch.cuda.device_count()
+    # device = torch.device('cuda:{}'.format(gpu) if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
 
     # redirect streams
     sys.stdout = open(join(tmp_dir, str(getpid()) + '.out'), 'a')
