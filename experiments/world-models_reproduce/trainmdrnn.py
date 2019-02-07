@@ -13,7 +13,7 @@ from utils.misc import save_checkpoint
 from utils.misc import ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE
 from utils.learning import EarlyStopping
 ## WARNING : THIS SHOULD BE REPLACE WITH PYTORCH 0.5
-from utils.learning import ReduceLROnPlateau
+from torch.optim.lr_scheduler  import ReduceLROnPlateau
 
 from data.loaders import RolloutSequenceDataset
 from models.vae import VAE
@@ -150,6 +150,7 @@ def get_loss(latent_obs, action, reward, terminal, latent_next_obs):
     :returns: dictionary of losses, containing the gmm, the mse, the bce and
         the averaged loss.
     """
+    # transpose such that seq_len is the first dimension
     latent_obs, action,\
         reward, terminal,\
         latent_next_obs = [arr.transpose(1, 0)

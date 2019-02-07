@@ -30,10 +30,14 @@ def gmm_loss(batch, mus, sigmas, logpi, reduce=True): # pylint: disable=too-many
     NOTE: The loss is not reduced along the feature dimension (i.e. it should scale ~linearily
     with fs).
     """
+    # batch size before unsqueeze (seq_len, batch_size, feature_size)
+    # batch size after unsqueeze ()
     batch = batch.unsqueeze(-2)
     normal_dist = Normal(mus, sigmas)
     g_log_probs = normal_dist.log_prob(batch)
     g_log_probs = logpi + torch.sum(g_log_probs, dim=-1)
+    # log sum exp
+    # https://blog.feedly.com/tricks-of-the-trade-logsumexp/
     max_log_probs = torch.max(g_log_probs, dim=-1, keepdim=True)[0]
     g_log_probs = g_log_probs - max_log_probs
 
@@ -83,7 +87,11 @@ class MDRNN(_MDRNNBase):
         seq_len, bs = actions.size(0), actions.size(1)
 
         ins = torch.cat([actions, latents], dim=-1)
-        outs, _ = self.rnn(ins)
+        if hasattr(self, 'hidden'):
+            outs, self.hidden = self.rnn(ins, self.hidden)
+        else:
+            outs, _ = self.rnn(ins)
+            print("no hidden unit initialized.")
         gmm_outs = self.gmm_linear(outs)
 
         stride = self.gaussians * self.latents
@@ -104,6 +112,12 @@ class MDRNN(_MDRNNBase):
         ds = gmm_outs[:, :, -1]
 
         return mus, sigmas, logpi, rs, ds
+
+    def init_hidden(self, batch_size=1):
+        # (num_layers * num_directions, batch, hidden_size)
+        self.hidden = torch.zeros(1, batch_size, self.hiddens), \
+                      torch.zeros(1, batch_size, self.hiddens)
+
 
 class MDRNNCell(_MDRNNBase):
     """ MDRNN model for one step forward """

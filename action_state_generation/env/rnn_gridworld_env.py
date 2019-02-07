@@ -35,6 +35,7 @@ class GridWorldEnv:
             self.init_lstm()
             self.init_weight()
             self.init_hidden()
+            self.eval()
 
         def init_lstm(self):
             self.lstm = nn.LSTM(input_size=self.lstm_input_dim,
