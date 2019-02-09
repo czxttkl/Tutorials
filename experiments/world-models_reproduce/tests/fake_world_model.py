@@ -28,8 +28,8 @@ class SimulatedWorldModel(nn.Module):
                             hidden_size=self.lstm_hidden_dim,
                             batch_first=True,
                             num_layers=self.lstm_num_layer)
-        # output mus, sigmas, pis for each guassian, and reward, terminal
-        self.gmm_linear = nn.Linear(self.lstm_hidden_dim, (2 * self.state_dim + 1) * self.num_gaussian + 2)
+        # output mus for each guassian, and reward
+        self.gmm_linear = nn.Linear(self.lstm_hidden_dim, self.state_dim * self.num_gaussian + 1)
 
     def init_hidden(self, batch_size=1):
         # (num_layers * num_directions, batch, hidden_size)
@@ -54,24 +54,9 @@ class SimulatedWorldModel(nn.Module):
         Y, self.hidden = self.lstm(X, self.hidden)
         gmm_outs = self.gmm_linear(Y)
 
-        stride = self.num_gaussian * self.state_dim
-
-        mus = gmm_outs[:, :, :stride]
+        mus = gmm_outs[:, :, :-1]
         mus = mus.view(seq_len, batch_size, self.num_gaussian, self.state_dim)
 
-        sigmas = gmm_outs[:, :, stride:2 * stride]
-        sigmas = sigmas.view(seq_len, batch_size, self.num_gaussian, self.state_dim)
-        sigmas = torch.exp(sigmas)
-        # make sigmas fall in more reasonable range
-        sigmas = torch.sqrt(sigmas)
+        rs = gmm_outs[:, :, -1]
 
-        pi = gmm_outs[:, :, 2 * stride: 2 * stride + self.num_gaussian]
-        pi = pi.view(seq_len, batch_size, self.num_gaussian)
-        # use temperature to make pi fall in more reasonable range
-        pi = pi / 10.
-        logpi = f.log_softmax(pi, dim=-1)
-
-        rs = gmm_outs[:, :, -2]
-        ds = gmm_outs[:, :, -1]
-
-        return mus, sigmas, logpi, rs, ds
+        return mus, rs
