@@ -96,8 +96,8 @@ class TestGMM(unittest.TestCase):
         return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
 
     def test_mdrnn_learning(self):
-        num_epochs = 2500
-        num_episodes = 4000
+        num_epochs = 1000
+        num_episodes = 400
         batch_size = 200
         action_dim = 2
         seq_len = 5
@@ -130,18 +130,15 @@ class TestGMM(unittest.TestCase):
             for s in range(seq_len):
                 cur_state = next_state
 
-                action = torch.zeros((1, 1, action_dim))
-                action[0, 0, :] = actions[numpy.random.randint(action_dim)]
+                action = torch.tensor(actions[numpy.random.randint(action_dim)]).view(1, 1, action_dim)
                 next_mus, reward = swm(action, cur_state)
+                terminal = 0
                 if s == seq_len - 1:
                     terminal = 1
-                else:
-                    terminal = 0
 
                 next_pi = torch.ones(simulated_num_gaussian) / simulated_num_gaussian
                 index = Categorical(next_pi).sample((1,)).long().item()
-                next_state = torch.zeros_like(cur_state)
-                next_state[0, 0, :] = next_mus[0, 0, index]
+                next_state = next_mus[0, 0, index].view(1, 1, state_dim)
 
                 print("{} cur_state: {}, action: {}, next_state: {}, reward: {}, terminal: {}"
                       .format(e, cur_state, action, next_state, reward, terminal))
@@ -219,8 +216,10 @@ class TestGMM(unittest.TestCase):
                 print()
 
             earlystopping.step(numpy.mean(cum_loss[-num_batch:]))
-            if numpy.mean(cum_loss[-num_batch:]) < -0.5 and earlystopping.stop:
+            if numpy.mean(cum_loss[-num_batch:]) < -3. and earlystopping.stop:
                 break
+
+        assert numpy.mean(cum_loss[-num_batch:]) < -3.
 
         sample_indices = [0]
         mdrnn.init_hidden(batch_size=len(sample_indices))
@@ -247,5 +246,5 @@ class TestGMM(unittest.TestCase):
         print()
 
 if __name__ == "__main__":
-    # TestGMM().test_gmm_loss_my()
+    TestGMM().test_gmm_loss_my()
     TestGMM().test_mdrnn_learning()
