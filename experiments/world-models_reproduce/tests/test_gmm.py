@@ -25,7 +25,7 @@ class TestGMM(unittest.TestCase):
                 ],
             ]
         ])
-        stds = torch.Tensor([
+        sigmas = torch.Tensor([
             [
                 [
                     [2., 2.],
@@ -43,17 +43,17 @@ class TestGMM(unittest.TestCase):
                     [3., 3.]
                 ]
         ])
-        gl = gmm_loss(batch, mus, stds, logpi)
+        gl = gmm_loss(batch, mus, sigmas, logpi)
 
         # first component, first dimension
-        n11 = Normal(mus[0, 0, 0, 0], stds[0, 0, 0, 0])
+        n11 = Normal(mus[0, 0, 0, 0], sigmas[0, 0, 0, 0])
         # first component, second dimension
-        n12 = Normal(mus[0, 0, 0, 1], stds[0, 0, 0, 1])
+        n12 = Normal(mus[0, 0, 0, 1], sigmas[0, 0, 0, 1])
         p1 = pi[0, 0, 0] * torch.exp(n11.log_prob(batch[0, 0, 0])) * torch.exp(n12.log_prob(batch[0, 0, 1]))
         # second component, first dimension
-        n21 = Normal(mus[0, 0, 1, 0], stds[0, 0, 1, 0])
+        n21 = Normal(mus[0, 0, 1, 0], sigmas[0, 0, 1, 0])
         # second component, second dimension
-        n22 = Normal(mus[0, 0, 1, 1], stds[0, 0, 1, 1])
+        n22 = Normal(mus[0, 0, 1, 1], sigmas[0, 0, 1, 1])
         p2 = pi[0, 0, 1] * torch.exp(n21.log_prob(batch[0, 0, 0])) * torch.exp(n22.log_prob(batch[0, 0, 1]))
 
         print("gmm loss={}, p1={}, p2={}, p1+p2={}, -log(p1+p2)={}".format(gl, p1, p2, p1+p2, -torch.log(p1 + p2)))
@@ -96,17 +96,18 @@ class TestGMM(unittest.TestCase):
         return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
 
     def test_mdrnn_learning(self):
-        num_epochs = 1500
-        num_episodes = 200
-        batch_size = 20
+        num_epochs = 2500
+        num_episodes = 4000
+        batch_size = 200
         action_dim = 2
-        seq_len = 3
-        state_dim = 1
+        seq_len = 5
+        state_dim = 2
         simulated_num_gaussian = 2
         mdrnn_num_gaussian = 2
         simulated_hidden_size = 3
         mdrnn_hidden_size = 10
         mdrnn_hidden_layer = 1
+        adam_lr = 0.01
         cur_state_mem = numpy.zeros((num_episodes, seq_len, state_dim))
         next_state_mem = numpy.zeros((num_episodes, seq_len, state_dim))
         action_mem = numpy.zeros((num_episodes, seq_len, action_dim))
@@ -122,18 +123,15 @@ class TestGMM(unittest.TestCase):
             lstm_hidden_dim=simulated_hidden_size,
         )
 
-        # init_cur_state = torch.randn((1, 1, state_dim))
         actions = torch.eye(action_dim)
         for e in range(num_episodes):
             swm.init_hidden(batch_size=1)
-            # next_state = init_cur_state
             next_state = torch.randn((1, 1, state_dim))
             for s in range(seq_len):
                 cur_state = next_state
 
                 action = torch.zeros((1, 1, action_dim))
                 action[0, 0, :] = actions[numpy.random.randint(action_dim)]
-                # action[0, 0, :] = actions[0]
                 next_mus, reward = swm(action, cur_state)
                 if s == seq_len - 1:
                     terminal = 1
@@ -142,11 +140,6 @@ class TestGMM(unittest.TestCase):
 
                 next_pi = torch.ones(simulated_num_gaussian) / simulated_num_gaussian
                 index = Categorical(next_pi).sample((1,)).long().item()
-                # index = e % simulated_num_gaussian
-                # if s == seq_len - 1:
-                #     index = Categorical(next_pi).sample((1,)).long().item()
-                # else:
-                #     index = 0
                 next_state = torch.zeros_like(cur_state)
                 next_state[0, 0, :] = next_mus[0, 0, index]
 
@@ -170,14 +163,14 @@ class TestGMM(unittest.TestCase):
             layers=mdrnn_hidden_layer,
         )
         mdrnn.train()
-        optimizer = torch.optim.Adam(mdrnn.parameters(), lr=0.01)
+        optimizer = torch.optim.Adam(mdrnn.parameters(), lr=adam_lr)
+        num_batch = num_episodes // batch_size
         earlystopping = EarlyStopping('min', patience=30)
 
         cum_loss = []
         cum_gmm = []
         cum_bce = []
         cum_mse = []
-        num_batch = num_episodes // batch_size
         for e in range(num_epochs):
             for i in range(0, num_batch):
                 mdrnn.init_hidden(batch_size=batch_size)
@@ -206,10 +199,6 @@ class TestGMM(unittest.TestCase):
                 cum_gmm += [losses['gmm'].item()]
                 cum_bce += [losses['bce'].item()]
                 cum_mse += [losses['mse'].item()]
-                # print("loss={loss:10.6f} bce={bce:10.6f} gmm={gmm:10.6f} mse={mse:10.6f}"
-                #       .format(
-                #           loss=cum_loss / (i + 1), bce=cum_bce / (i + 1),
-                #           gmm=cum_gmm / state_dim / (i + 1), mse=cum_mse / (i + 1)))
                 print("loss={loss:10.6f} bce={bce:10.6f} gmm={gmm:10.6f} mse={mse:10.6f}"
                     .format(
                     loss=losses['loss'],
@@ -230,7 +219,7 @@ class TestGMM(unittest.TestCase):
                 print()
 
             earlystopping.step(numpy.mean(cum_loss[-num_batch:]))
-            if numpy.mean(cum_loss[-num_batch:]) < -1:
+            if numpy.mean(cum_loss[-num_batch:]) < -0.5 and earlystopping.stop:
                 break
 
         sample_indices = [0]
@@ -256,59 +245,6 @@ class TestGMM(unittest.TestCase):
         print(gl)
 
         print()
-
-
-    """ Test GMMs """
-    def test_gmm_loss(self):
-        """ Test case 1 """
-        n_samples = 10000
-
-        means = torch.Tensor([[0., 0.],
-                              [1., 1.],
-                              [-1., 1.]])
-        stds = torch.Tensor([[.03, .05],
-                             [.02, .1],
-                             [.1, .03]])
-        pi = torch.Tensor([.2, .3, .5])
-
-        cat_dist = Categorical(pi)
-        indices = cat_dist.sample((n_samples,)).long()
-        rands = torch.randn(n_samples, 2)
-
-        samples = means[indices] + rands * stds[indices]
-
-        class _model(nn.Module):
-            def __init__(self, gaussians):
-                super().__init__()
-                self.means = nn.Parameter(torch.Tensor(1, gaussians, 2).normal_())
-                self.pre_stds = nn.Parameter(torch.Tensor(1, gaussians, 2).normal_())
-                self.pi = nn.Parameter(torch.Tensor(1, gaussians).normal_())
-
-            def forward(self, *inputs):
-                return self.means.data, torch.exp(self.pre_stds), f.softmax(self.pi, dim=1)
-
-        model = _model(3)
-        optimizer = torch.optim.Adam(model.parameters())
-
-        iterations = 100000
-        log_step = iterations // 10
-        pbar = tqdm(total=iterations)
-        cum_loss = 0
-        for i in range(iterations):
-            batch = samples[torch.LongTensor(128).random_(0, n_samples)]
-            m, s, p = model.forward()
-            loss = gmm_loss(batch, m, s, p)
-            cum_loss += loss.item()
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            pbar.set_postfix_str("avg_loss={:10.6f}".format(
-                cum_loss / (i + 1)))
-            pbar.update(1)
-            if i % log_step == log_step - 1:
-                print(m)
-                print(s)
-                print(p)
 
 if __name__ == "__main__":
     # TestGMM().test_gmm_loss_my()

@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as f
 from torch.distributions.normal import Normal
 
+
 def gmm_loss(batch, mus, sigmas, logpi, reduce=True): # pylint: disable=too-many-arguments
     """ Computes the gmm loss.
 
@@ -109,7 +110,6 @@ class MDRNN(_MDRNNBase):
         logpi = f.log_softmax(pi, dim=-1)
 
         rs = gmm_outs[:, :, -2]
-
         ds = gmm_outs[:, :, -1]
 
         return mus, sigmas, logpi, rs, ds
@@ -163,7 +163,6 @@ class MDRNNCell(_MDRNNBase):
         logpi = f.log_softmax(pi, dim=-2)
 
         r = out_full[:, -2]
-
         d = out_full[:, -1]
 
         return mus, sigmas, logpi, r, d, next_hidden

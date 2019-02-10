@@ -24,10 +24,11 @@ class SimulatedWorldModel(nn.Module):
         self.eval()
 
     def init_lstm(self):
-        self.lstm = nn.LSTM(input_size=self.action_dim + self.state_dim,
-                            hidden_size=self.lstm_hidden_dim,
-                            batch_first=True,
-                            num_layers=self.lstm_num_layer)
+        self.lstm = nn.LSTM(
+            input_size=self.action_dim + self.state_dim,
+            hidden_size=self.lstm_hidden_dim,
+            num_layers=self.lstm_num_layer
+        )
         # output mus for each guassian, and reward
         self.gmm_linear = nn.Linear(self.lstm_hidden_dim, self.state_dim * self.num_gaussian + 1)
 
@@ -39,9 +40,9 @@ class SimulatedWorldModel(nn.Module):
     def init_weight(self):
         torch.manual_seed(3212)
         for n, p in self.lstm.named_parameters():
-            nn.init.normal_(p, 0, 5)
+            nn.init.normal_(p, 0, 1)
         for n, p in self.gmm_linear.named_parameters():
-            nn.init.normal_(p, 0, 5)
+            nn.init.normal_(p, 0, 1)
         torch.manual_seed(random.randint(0, 1000))
 
     def forward(self, actions, cur_states):
@@ -56,7 +57,6 @@ class SimulatedWorldModel(nn.Module):
 
         mus = gmm_outs[:, :, :-1]
         mus = mus.view(seq_len, batch_size, self.num_gaussian, self.state_dim)
-
         rs = gmm_outs[:, :, -1]
 
         return mus, rs
