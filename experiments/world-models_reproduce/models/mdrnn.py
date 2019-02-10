@@ -50,12 +50,13 @@ def gmm_loss(batch, mus, sigmas, logpi, reduce=True): # pylint: disable=too-many
     return - log_prob
 
 class _MDRNNBase(nn.Module):
-    def __init__(self, latents, actions, hiddens, gaussians):
+    def __init__(self, latents, actions, hiddens, gaussians, layers):
         super().__init__()
         self.latents = latents
         self.actions = actions
         self.hiddens = hiddens
         self.gaussians = gaussians
+        self.layers = layers
 
         self.gmm_linear = nn.Linear(
             hiddens, (2 * latents + 1) * gaussians + 2)
@@ -65,9 +66,9 @@ class _MDRNNBase(nn.Module):
 
 class MDRNN(_MDRNNBase):
     """ MDRNN model for multi steps forward """
-    def __init__(self, latents, actions, hiddens, gaussians):
-        super().__init__(latents, actions, hiddens, gaussians)
-        self.rnn = nn.LSTM(latents + actions, hiddens)
+    def __init__(self, latents, actions, hiddens, gaussians, layers):
+        super().__init__(latents, actions, hiddens, gaussians, layers)
+        self.rnn = nn.LSTM(latents + actions, hiddens, layers)
 
     def forward(self, actions, latents): # pylint: disable=arguments-differ
         """ MULTI STEPS forward.
@@ -115,8 +116,8 @@ class MDRNN(_MDRNNBase):
 
     def init_hidden(self, batch_size=1):
         # (num_layers * num_directions, batch, hidden_size)
-        self.hidden = torch.zeros(1, batch_size, self.hiddens), \
-                      torch.zeros(1, batch_size, self.hiddens)
+        self.hidden = torch.zeros(self.layers, batch_size, self.hiddens), \
+                      torch.zeros(self.layers, batch_size, self.hiddens)
 
 
 class MDRNNCell(_MDRNNBase):

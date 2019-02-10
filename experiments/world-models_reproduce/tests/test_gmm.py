@@ -57,6 +57,7 @@ class TestGMM(unittest.TestCase):
         p2 = pi[0, 0, 1] * torch.exp(n21.log_prob(batch[0, 0, 0])) * torch.exp(n22.log_prob(batch[0, 0, 1]))
 
         print("gmm loss={}, p1={}, p2={}, p1+p2={}, -log(p1+p2)={}".format(gl, p1, p2, p1+p2, -torch.log(p1 + p2)))
+        assert -torch.log(p1 + p2) == gl
         print()
 
     def transpose(self, *args):
@@ -84,34 +85,28 @@ class TestGMM(unittest.TestCase):
         :returns: dictionary of losses, containing the gmm, the mse, the bce and
             the averaged loss.
         """
-        # transpose such that seq_len is the first dimension
-        # obs, action, \
-        # reward, terminal, \
-        # next_obs = [arr.transpose(1, 0)
-        #             for arr in [obs, action,
-        #                         reward, terminal,
-        #                         next_obs]]
-
         obs, action, reward, terminal, next_obs = self.transpose(obs, action, reward, terminal, next_obs)
         mus, sigmas, logpi, rs, ds = mdrnn(action, obs)
         gmm = gmm_loss(next_obs, mus, sigmas, logpi)
         bce = f.binary_cross_entropy_with_logits(ds, terminal)
         mse = f.mse_loss(rs, reward)
         # loss = (gmm + bce + mse) / (state_dim + 2)
+        # loss = gmm
         loss = mse + bce + gmm
         return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
 
     def test_mdrnn_learning(self):
-        num_epochs = 600
-        num_episodes = 400
-        batch_size = 4
+        num_epochs = 60000
+        num_episodes = 20000
+        batch_size = 2000
         action_dim = 2
-        seq_len = 3
-        state_dim = 4
+        seq_len = 1
+        state_dim = 5
         simulated_num_gaussian = 2
         mdrnn_num_gaussian = 2
         simulated_hidden_size = 3
-        mdrnn_hidden_size = 100
+        mdrnn_hidden_size = 300
+        mdrnn_hidden_layer = 1
         cur_state_mem = numpy.zeros((num_episodes, seq_len, state_dim))
         next_state_mem = numpy.zeros((num_episodes, seq_len, state_dim))
         action_mem = numpy.zeros((num_episodes, seq_len, action_dim))
@@ -132,11 +127,13 @@ class TestGMM(unittest.TestCase):
         for e in range(num_episodes):
             swm.init_hidden(batch_size=1)
             next_state = init_cur_state
+            # next_state = torch.randn((1, 1, state_dim))
             for s in range(seq_len):
                 cur_state = next_state
 
                 action = torch.zeros((1, 1, action_dim))
-                action[0, 0, :] = actions[numpy.random.randint(action_dim)]
+                # action[0, 0, :] = actions[numpy.random.randint(action_dim)]
+                action[0, 0, :] = actions[0]
                 next_mus, reward = swm(action, cur_state)
                 if s == seq_len - 1:
                     terminal = 1
@@ -144,14 +141,15 @@ class TestGMM(unittest.TestCase):
                     terminal = 0
 
                 next_pi = torch.ones(simulated_num_gaussian) / simulated_num_gaussian
-                index = Categorical(next_pi).sample((1,)).long().item()
+                # index = Categorical(next_pi).sample((1,)).long().item()
+                index = e % simulated_num_gaussian
                 next_state = torch.zeros_like(cur_state)
                 next_state[0, 0, :] = next_mus[0, 0, index]
 
-                print("cur_state: {}, action: {}, next_state: {}, reward: {}, terminal: {}"
-                      .format(cur_state, action, next_state, reward, terminal))
+                print("{} cur_state: {}, action: {}, next_state: {}, reward: {}, terminal: {}"
+                      .format(e, cur_state, action, next_state, reward, terminal))
                 print("next_pi: {}, sampled index: {}".format(next_pi, index))
-                print("next_mus:", next_mus)
+                print("next_mus:", next_mus, "\n")
 
                 cur_state_mem[e, s, :] = cur_state.detach().numpy()
                 action_mem[e, s, :] = action.numpy()
@@ -164,18 +162,22 @@ class TestGMM(unittest.TestCase):
             latents=state_dim,
             actions=action_dim,
             gaussians=mdrnn_num_gaussian,
-            hiddens=mdrnn_hidden_size
+            hiddens=mdrnn_hidden_size,
+            layers=mdrnn_hidden_layer,
         )
         mdrnn.train()
-        optimizer = torch.optim.RMSprop(mdrnn.parameters(), lr=1e-2)
+        optimizer = torch.optim.Adam(mdrnn.parameters(), lr=0.01)
+        earlystopping = EarlyStopping('min', patience=30)
 
         cum_loss = []
         cum_gmm = []
         cum_bce = []
         cum_mse = []
+        num_batch = num_episodes // batch_size
         for e in range(num_epochs):
-            for i in range(0, num_episodes // batch_size):
+            for i in range(0, num_batch):
                 mdrnn.init_hidden(batch_size=batch_size)
+                optimizer.zero_grad()
                 sample_indices = numpy.random.randint(num_episodes, size=batch_size)
 
                 obs, action, reward, terminal, next_obs = \
@@ -191,9 +193,8 @@ class TestGMM(unittest.TestCase):
                     torch.tensor(terminal, dtype=torch.float), \
                     torch.tensor(next_obs, dtype=torch.float)
 
-                print("learning at epoch {} step {}".format(e, i))
+                print("learning at epoch {} step {} best score {} counter {}".format(e, i, earlystopping.best, earlystopping.num_bad_epochs))
                 losses = self.get_loss(obs, action, reward, terminal, next_obs, state_dim, mdrnn)
-                optimizer.zero_grad()
                 losses['loss'].backward()
                 optimizer.step()
 
@@ -221,9 +222,14 @@ class TestGMM(unittest.TestCase):
                     mse=numpy.mean(cum_mse),
                 )
                 )
+
                 print()
 
-        sample_indices = [0]
+            earlystopping.step(numpy.mean(cum_loss[-num_batch:]))
+            if numpy.mean(cum_loss[-num_batch:]) < -5:
+                break
+
+        sample_indices = [0, 1]
         mdrnn.init_hidden(batch_size=len(sample_indices))
         mdrnn.eval()
         obs, action, reward, terminal, next_obs = \
