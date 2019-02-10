@@ -96,16 +96,16 @@ class TestGMM(unittest.TestCase):
         return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
 
     def test_mdrnn_learning(self):
-        num_epochs = 60000
-        num_episodes = 20000
-        batch_size = 2000
+        num_epochs = 1500
+        num_episodes = 200
+        batch_size = 20
         action_dim = 2
-        seq_len = 1
-        state_dim = 5
+        seq_len = 3
+        state_dim = 1
         simulated_num_gaussian = 2
         mdrnn_num_gaussian = 2
         simulated_hidden_size = 3
-        mdrnn_hidden_size = 300
+        mdrnn_hidden_size = 10
         mdrnn_hidden_layer = 1
         cur_state_mem = numpy.zeros((num_episodes, seq_len, state_dim))
         next_state_mem = numpy.zeros((num_episodes, seq_len, state_dim))
@@ -122,18 +122,18 @@ class TestGMM(unittest.TestCase):
             lstm_hidden_dim=simulated_hidden_size,
         )
 
-        init_cur_state = torch.randn((1, 1, state_dim))
+        # init_cur_state = torch.randn((1, 1, state_dim))
         actions = torch.eye(action_dim)
         for e in range(num_episodes):
             swm.init_hidden(batch_size=1)
-            next_state = init_cur_state
-            # next_state = torch.randn((1, 1, state_dim))
+            # next_state = init_cur_state
+            next_state = torch.randn((1, 1, state_dim))
             for s in range(seq_len):
                 cur_state = next_state
 
                 action = torch.zeros((1, 1, action_dim))
-                # action[0, 0, :] = actions[numpy.random.randint(action_dim)]
-                action[0, 0, :] = actions[0]
+                action[0, 0, :] = actions[numpy.random.randint(action_dim)]
+                # action[0, 0, :] = actions[0]
                 next_mus, reward = swm(action, cur_state)
                 if s == seq_len - 1:
                     terminal = 1
@@ -141,8 +141,12 @@ class TestGMM(unittest.TestCase):
                     terminal = 0
 
                 next_pi = torch.ones(simulated_num_gaussian) / simulated_num_gaussian
-                # index = Categorical(next_pi).sample((1,)).long().item()
-                index = e % simulated_num_gaussian
+                index = Categorical(next_pi).sample((1,)).long().item()
+                # index = e % simulated_num_gaussian
+                # if s == seq_len - 1:
+                #     index = Categorical(next_pi).sample((1,)).long().item()
+                # else:
+                #     index = 0
                 next_state = torch.zeros_like(cur_state)
                 next_state[0, 0, :] = next_mus[0, 0, index]
 
@@ -226,10 +230,10 @@ class TestGMM(unittest.TestCase):
                 print()
 
             earlystopping.step(numpy.mean(cum_loss[-num_batch:]))
-            if numpy.mean(cum_loss[-num_batch:]) < -5:
+            if numpy.mean(cum_loss[-num_batch:]) < -1:
                 break
 
-        sample_indices = [0, 1]
+        sample_indices = [0]
         mdrnn.init_hidden(batch_size=len(sample_indices))
         mdrnn.eval()
         obs, action, reward, terminal, next_obs = \
