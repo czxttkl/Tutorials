@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as f
 
 
-
 class SimulatedWorldModel(nn.Module):
     """ A world model used for simulation. Underlying is an RNN with fixed parameters. """
 

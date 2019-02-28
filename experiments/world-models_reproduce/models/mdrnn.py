@@ -32,7 +32,7 @@ def gmm_loss(batch, mus, sigmas, logpi, reduce=True): # pylint: disable=too-many
     with fs).
     """
     # batch size before unsqueeze (seq_len, batch_size, feature_size)
-    # batch size after unsqueeze ()
+    # batch size after unsqueeze (seq_len, batch_size, -1, feature_size)
     batch = batch.unsqueeze(-2)
     normal_dist = Normal(mus, sigmas)
     g_log_probs = normal_dist.log_prob(batch)

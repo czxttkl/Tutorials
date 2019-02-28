@@ -1,4 +1,8 @@
 """ Test gmm loss """
+import sys, os
+myPath = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, myPath + '/../')
+
 import unittest
 import torch
 import torch.nn as nn
@@ -91,12 +95,12 @@ class TestGMM(unittest.TestCase):
         bce = f.binary_cross_entropy_with_logits(ds, terminal)
         mse = f.mse_loss(rs, reward)
         # loss = (gmm + bce + mse) / (state_dim + 2)
-        # loss = gmm
+        # loss = bce
         loss = mse + bce + gmm
         return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
 
     def test_mdrnn_learning(self):
-        num_epochs = 1000
+        num_epochs = 300
         num_episodes = 400
         batch_size = 200
         action_dim = 2
