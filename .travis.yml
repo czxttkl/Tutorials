@@ -14,6 +14,7 @@ install:
 script:
   - pytest lstm_reward_function/tests --cov=lstm_reward_function/ --cov-append
   - travis_wait 60 pytest experiments/world-models_reproduce/tests/test_gmm.py --cov=experiments/world-models_reproduce/ --cov-append
+  - pytest experiments/hyper_opt/hyper_opt_exp.py --cov=experiments/hyper_opt/ --cov-append
   - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_dqn_gridworld --cov=action_state_generation/ --cov-append
   - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_lstm_gridworld --cov=action_state_generation/ --cov-append
   - travis_wait 60 pytest action_state_generation/tests/test_online_train.py::test_online_train_lstm_rnn_gridworld --cov=action_state_generation/ --cov-append
