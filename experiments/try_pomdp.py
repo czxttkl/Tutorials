@@ -5,7 +5,7 @@ https://papers.nips.cc/paper/4031-monte-carlo-planning-in-large-pomdps.pdf
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-
+import itertools
 import numpy as np
 from gym import Env
 from gym.spaces import Discrete, Box
@@ -16,15 +16,15 @@ from typing import NamedTuple
 MICRO = dict(
     _maze=np.array(
         [
-            [1, 3, 2, 3, 3],
-            [3, 0, 3, 0, 3],
-            [3, 3, 3, 3, 3],
-            [3, 0, 3, 0, 3],
-            [3, 3, 3, 3, 1],
+            [1, 3, 3, 2, 3, 3],
+            [3, 3, 0, 3, 0, 3],
+            [3, 3, 3, 3, 3, 3],
+            [1, 1, 0, 3, 0, 3],
+            [1, 2, 3, 3, 3, 1],
         ],
         dtype=np.int8,
     ),
-    _num_ghosts=1,
+    _num_ghosts=2,
     _ghost_range=3,
     _ghost_home=(4, 4),
     _poc_home=(0, 0),
@@ -267,7 +267,7 @@ class PocEnv(Env):
 
     def _make_ob(self, action):
         # 10 state features in total
-        # 4 features indicating whether the agent is moving along each cardinal direction and can see a ghost
+        # 4 features indicating whether the agent can see a ghost
         # in that direction (UP, RIGHT, DOWN, LEFT)
         # 4 features indicating whether he can feel a wall in each of the cardinal
         # directions, which is set to 1 if he is adjacent to a wall.
@@ -409,11 +409,12 @@ class PocEnv(Env):
 if __name__ == "__main__":
     env = PocEnv("micro")
     env.seed(313)
+    acc_rws = []
 
-    for e in range(3):
+    for e in range(1000):
         env.reset()
         acc_rw = 0
-        for i in range(10000):
+        for i in itertools.count():
             print("step", i)
             env.print_internal_state()
             action = random_action()
@@ -422,7 +423,10 @@ if __name__ == "__main__":
             env.print_internal_state()
             acc_rw += rw
             if done:
-                print("done in {} step, accumulated reward {}".format(i, acc_rw))
+                print("Epoch {} done in {} step, accumulated reward {}".format(e, i, acc_rw))
                 print("\n\n\n")
                 break
             print()
+        acc_rws.append(acc_rw)
+
+    print("average accumulated reward {}".format(np.mean(acc_rws)))
