@@ -1,16 +1,14 @@
-"""
-Pocman environment first introduced in Monte-Carlo Planning in Large POMDPs by
-Silver and Veness, 2010:
-https://papers.nips.cc/paper/4031-monte-carlo-planning-in-large-pomdps.pdf
-"""
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import itertools
-import numpy as np
-from gym import Env
-from gym.spaces import Discrete, Box
+import logging
 from typing import NamedTuple
 
+import numpy as np
+from gym import Env
+from gym.spaces import Box, Discrete
+
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 MICRO = dict(
@@ -35,7 +33,6 @@ MICRO = dict(
 )
 
 
-
 STATE_DIM = 10
 
 
@@ -47,7 +44,13 @@ class Action:
 
 
 ACTIONS = [Action.UP, Action.RIGHT, Action.DOWN, Action.LEFT]
-ACTION_DICT = {Action.UP: "UP", Action.RIGHT: "RIGHT", Action.DOWN: "DOWN", Action.LEFT: "LEFT"}
+ACTION_DICT = {
+    Action.UP: "UP",
+    Action.RIGHT: "RIGHT",
+    Action.DOWN: "DOWN",
+    Action.LEFT: "LEFT",
+}
+
 
 class Element:
     WALL = 0
@@ -76,7 +79,11 @@ def opposite_direction(d):
 
 
 class Position(NamedTuple):
-    """ The index at the left up corner is (0, 0); The index at the right bottom corner is (height-1, width-1)"""
+    """
+    The index at the left up corner is (0, 0);
+    The index at the right bottom corner is (height-1, width-1)
+    """
+
     x: int
     y: int
 
@@ -113,7 +120,6 @@ class Ghost(object):
             self.move_type = "random"
             self._move_random()
 
-
     def _move_random(self):
         movable_directions = set()
         for action in ACTIONS:
@@ -121,13 +127,11 @@ class Ghost(object):
             if self.pos != next_pos:
                 movable_directions.add(action)
 
-        if set([opposite_direction(self.direction), self.direction]) == movable_directions:
-            next_pos = self.env.next_pos(self.pos, self.direction)
-            self.update(next_pos, self.direction)
-            return
-
         # no doubling back unless no other choice
-        if opposite_direction(self.direction) in movable_directions and len(movable_directions) > 1:
+        if (
+            opposite_direction(self.direction) in movable_directions
+            and len(movable_directions) > 1
+        ):
             movable_directions.remove(opposite_direction(self.direction))
         d = np.random.choice(list(movable_directions))
         next_pos = self.env.next_pos(self.pos, d)
@@ -171,7 +175,8 @@ class Ghost(object):
 
     def reset(self):
         self.pos = self.home
-        # self.direction = random_action()
+        self.direction = random_action()
+        self.move_type = "init"
 
 
 def select_maze(maze):
@@ -183,8 +188,8 @@ def select_maze(maze):
 
 
 class PocEnv(Env):
-    def __init__(self, maze):
-        self.board = select_maze(maze)
+    def __init__(self):
+        self.board = select_maze("micro")
         self._get_init_state()
         self.action_space = Discrete(4)
         self.observation_space = Box(low=0, high=1, shape=(8,))
@@ -240,13 +245,17 @@ class PocEnv(Env):
 
         if self._agent_at_food():
             reward += 10
-            self.maze[self.internal_state.agent_pos.x, self.internal_state.agent_pos.y] = Element.CLEAR_WALK_WAY
+            self.maze[
+                self.internal_state.agent_pos.x, self.internal_state.agent_pos.y
+            ] = Element.CLEAR_WALK_WAY
             if self._food_left() == 0:
                 self.done = True
 
         if self._agent_at_power():
             self.internal_state.power_duration = self.board["_power_duration"]
-            self.maze[self.internal_state.agent_pos.x, self.internal_state.agent_pos.y] = Element.CLEAR_WALK_WAY
+            self.maze[
+                self.internal_state.agent_pos.x, self.internal_state.agent_pos.y
+            ] = Element.CLEAR_WALK_WAY
             reward += 10
 
         ob = self._make_ob(action)
@@ -266,14 +275,17 @@ class PocEnv(Env):
         return False
 
     def _make_ob(self, action):
-        # 10 state features in total
-        # 4 features indicating whether the agent can see a ghost
-        # in that direction (UP, RIGHT, DOWN, LEFT)
-        # 4 features indicating whether he can feel a wall in each of the cardinal
-        # directions, which is set to 1 if he is adjacent to a wall.
-        # 1 feature indicating whether he can hear a ghost, which is set to 1 if he is
-        # within Manhattan distance 2 of a ghost.
-        # 1 feature indicating whether he can smell food (adjacent or diagonally adjacent to any food)/
+        """
+        Return 10 state features of observation:
+        4 features indicating whether the agent can see a ghost
+            in that direction (UP, RIGHT, DOWN, LEFT)
+        4 features indicating whether he can feel a wall in each of the
+            cardinal directions, which is set to 1 if he is adjacent to a wall
+        1 feature indicating whether he can hear a ghost, which is set to 1
+            if he is within Manhattan distance 2 of a ghost
+        1 feature indicating whether he can smell food (adjacent or
+            diagonally adjacent to any food)
+        """
         ob = np.zeros(STATE_DIM)
         for i, action in enumerate(ACTIONS):
             if self._see_ghost(action):
@@ -283,9 +295,9 @@ class PocEnv(Env):
             if next_pos == self.internal_state.agent_pos:
                 ob[i + len(ACTIONS)] = 1
         if self._hear_ghost():
-            ob[2*len(ACTIONS)] = 1
+            ob[2 * len(ACTIONS)] = 1
         if self._smell_food():
-            ob[2*len(ACTIONS) + 1] = 1
+            ob[2 * len(ACTIONS) + 1] = 1
         return ob
 
     def _see_ghost(self, action):
@@ -293,12 +305,13 @@ class PocEnv(Env):
         for ghost in self.internal_state.ghosts:
             if agent_pos.x != ghost.pos.x and agent_pos.y != ghost.pos.y:
                 continue
-            if (action == Action.UP and ghost.pos.x < agent_pos.x) \
-                or (action == Action.DOWN and ghost.pos.x > agent_pos.x) \
-                or (action == Action.LEFT and ghost.pos.y < agent_pos.y) \
-                or (action == Action.RIGHT and ghost.pos.y > agent_pos.y):
-                if not self._wall_between(agent_pos, ghost.pos):
-                    return True
+            if (
+                (action == Action.UP and ghost.pos.x < agent_pos.x)
+                or (action == Action.DOWN and ghost.pos.x > agent_pos.x)
+                or (action == Action.LEFT and ghost.pos.y < agent_pos.y)
+                or (action == Action.RIGHT and ghost.pos.y > agent_pos.y)
+            ) and not self._wall_between(agent_pos, ghost.pos):
+                return True
         return False
 
     def _smell_food(self):
@@ -309,13 +322,20 @@ class PocEnv(Env):
             for y in range(-smell_range, smell_range + 1):
                 smell_x = agent_pos.x + x
                 smell_y = agent_pos.y + y
-                if 0 <= smell_x < self.maze.shape[0] and 0 <= smell_y < self.maze.shape[1] and self.maze[smell_x, smell_y] == Element.FOOD_PELLET:
+                if (
+                    0 <= smell_x < self.maze.shape[0]
+                    and 0 <= smell_y < self.maze.shape[1]
+                    and self.maze[smell_x, smell_y] == Element.FOOD_PELLET
+                ):
                     return True
         return False
 
     def _hear_ghost(self):
         for ghost in self.internal_state.ghosts:
-            if manhattan_distance(ghost.pos, self.internal_state.agent_pos) <= self.board["_hear_range"]:
+            if (
+                manhattan_distance(ghost.pos, self.internal_state.agent_pos)
+                <= self.board["_hear_range"]
+            ):
                 return True
         return False
 
@@ -350,10 +370,16 @@ class PocEnv(Env):
         ghost_home = Position(*self.board["_ghost_home"])
         Ghost.home = ghost_home
 
-        for g in range(self.board["_num_ghosts"]):
+        for _ in range(self.board["_num_ghosts"]):
             pos = Position(ghost_home.x, ghost_home.y)
             self.internal_state.ghosts.append(
-                Ghost(self, pos, direction=random_action(), ghost_range=self.board["_ghost_range"]))
+                Ghost(
+                    self,
+                    pos,
+                    direction=random_action(),
+                    ghost_range=self.board["_ghost_range"],
+                )
+            )
 
         return self.internal_state
 
@@ -380,15 +406,24 @@ class PocEnv(Env):
             return pos
 
     def print_internal_state(self):
+        print("Step", self.step_cnt)
         print_maze = self.maze.astype(str)
-        print_maze[self.internal_state.agent_pos.x, self.internal_state.agent_pos.y] = 'A'
+        print_maze[
+            self.internal_state.agent_pos.x, self.internal_state.agent_pos.y
+        ] = "A"
         ghost_str = ""
         for g, ghost in enumerate(self.internal_state.ghosts):
-            print_maze[ghost.pos.x, ghost.pos.y] = 'G'
-            ghost_str += "ghost {} at {}, direction={}, type={}\n".format(g, ghost.pos, ACTION_DICT[ghost.direction], ghost.move_type)
-        np.set_printoptions(formatter={'str_kind': lambda x: x})
-        print("maze: \n{}".format(print_maze))
-        print("agent at {}, power duration {}".format(self.internal_state.agent_pos, self.internal_state.power_duration))
+            print_maze[ghost.pos.x, ghost.pos.y] = "G"
+            ghost_str += "Ghost {} at {}, direction={}, type={}\n".format(
+                g, ghost.pos, ACTION_DICT[ghost.direction], ghost.move_type
+            )
+        np.set_printoptions(formatter={"str_kind": lambda x: x})
+        print("Maze: \n{}".format(print_maze))
+        print(
+            "Agent at {}, power duration {}".format(
+                self.internal_state.agent_pos, self.internal_state.power_duration
+            )
+        )
         print(ghost_str[:-1])
 
     def print_ob(self, ob):
@@ -407,7 +442,7 @@ class PocEnv(Env):
 
 
 if __name__ == "__main__":
-    env = PocEnv("micro")
+    env = PocEnv()
     env.seed(313)
     acc_rws = []
 
@@ -415,18 +450,24 @@ if __name__ == "__main__":
         env.reset()
         acc_rw = 0
         for i in itertools.count():
-            print("step", i)
             env.print_internal_state()
             action = random_action()
             ob, rw, done, info = env.step(action)
-            print("after action {}: reward {}, observation {} ({})".format(ACTION_DICT[action], rw, ob, env.print_ob(ob)))
+            print(
+                "After action {}: reward {}, observation {} ({})".format(
+                    ACTION_DICT[action], rw, ob, env.print_ob(ob)
+                )
+            )
             env.print_internal_state()
             acc_rw += rw
             if done:
-                print("Epoch {} done in {} step, accumulated reward {}".format(e, i, acc_rw))
-                print("\n\n\n")
+                print(
+                    "Epoch {} done in {} step, accumulated reward {}\n\n".format(
+                        e, i, acc_rw
+                    )
+                )
                 break
             print()
         acc_rws.append(acc_rw)
 
-    print("average accumulated reward {}".format(np.mean(acc_rws)))
+    print("Average accumulated reward {}".format(np.mean(acc_rws)))
