@@ -1,8 +1,11 @@
+import copy
+import math
+import time
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math, copy, time
 from torch.autograd import Variable
 
 
@@ -14,15 +17,14 @@ def clones(module, N):
 def subsequent_mask(size):
     "Mask out subsequent positions."
     attn_shape = (1, size, size)
-    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
+    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype("uint8")
     return torch.from_numpy(subsequent_mask) == 0
 
 
 def attention(query, key, value, mask=None, dropout=None):
     "Compute 'Scaled Dot Product Attention'"
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-2, -1)) \
-             / math.sqrt(d_k)
+    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
     p_attn = F.softmax(scores, dim=-1)
@@ -62,14 +64,25 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, src, tgt, src_mask, tgt_mask):
         "Take in and process masked src and target sequences."
-        return self.decode(self.encode(src, src_mask), src_mask,
-                           tgt, tgt_mask)
+        # encode_output shape: batch_size, input_dim, dim_model
+        encode_output = self.encode(src, src_mask)
+        return self.decode(encode_output, src_mask, tgt, tgt_mask)
 
     def encode(self, src, src_mask):
-        return self.encoder(self.src_embed(src), src_mask)
+        # src shape: batch_size, input_dim
+        # src_mask shape: batch_size, 1, input_dim
+        # src_embed: batch_size, input_dim, dim_model
+        src_embed = self.src_embed(src)
+        return self.encoder(src_embed, src_mask)
 
     def decode(self, memory, src_mask, tgt, tgt_mask):
-        return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
+        # memory shape: batch_size, input_dim, dim_model
+        # src_mask shape: batch_size, 1, input_dim
+        # tgt shape: batch_size, input_dim - 1
+        # tgt_mask shape: batch_size, input_dim-1, input_dim-1
+        # tgt_embed shape: batch_size, input_dim-1, dim_model
+        tgt_embed = self.tgt_embed(tgt)
+        return self.decoder(tgt_embed, memory, src_mask, tgt_mask)
 
 
 class Encoder(nn.Module):
@@ -78,7 +91,7 @@ class Encoder(nn.Module):
     def __init__(self, layer, N):
         super(Encoder, self).__init__()
         self.layers = clones(layer, N)
-        self.norm = LayerNorm(layer.size)
+        self.norm = LayerNorm(layer.dim_model)
 
     def forward(self, x, mask):
         "Pass the input (and mask) through each layer in turn."
@@ -104,9 +117,9 @@ class SublayerConnection(nn.Module):
     Note for code simplicity the norm is first as opposed to last.
     """
 
-    def __init__(self, size, dropout):
+    def __init__(self, dim_model, dropout):
         super(SublayerConnection, self).__init__()
-        self.norm = LayerNorm(size)
+        self.norm = LayerNorm(dim_model)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, sublayer):
@@ -117,17 +130,18 @@ class SublayerConnection(nn.Module):
 class EncoderLayer(nn.Module):
     "Encoder is made up of self-attn and feed forward (defined below)"
 
-    def __init__(self, size, self_attn, feed_forward, dropout):
+    def __init__(self, dim_model, self_attn, feed_forward, dropout):
         super(EncoderLayer, self).__init__()
         self.self_attn = self_attn
         self.feed_forward = feed_forward
-        self.sublayer = clones(SublayerConnection(size, dropout), 2)
-        self.size = size
+        self.sublayer = clones(SublayerConnection(dim_model, dropout), 2)
+        self.dim_model = dim_model
 
-    def forward(self, x, mask):
+    def forward(self, src_embed, src_mask):
         "Follow Figure 1 (left) for connections."
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
-        return self.sublayer[1](x, self.feed_forward)
+        # attn_output = self.self_attn(x, x, x, src_mask)
+        src_embed = self.sublayer[0](src_embed, lambda x: self.self_attn(x, x, x, src_mask))
+        return self.sublayer[1](src_embed, self.feed_forward)
 
 
 class Decoder(nn.Module):
@@ -183,27 +197,26 @@ class MultiHeadedAttention(nn.Module):
         nbatches = query.size(0)
 
         # 1) Do all the linear projections in batch from d_model => h x d_k
-        query, key, value = \
-            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-             for l, x in zip(self.linears, (query, key, value))]
+        query, key, value = [
+            l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+            for l, x in zip(self.linears, (query, key, value))
+        ]
 
         # 2) Apply attention on all the projected vectors in batch.
-        x, self.attn = attention(query, key, value, mask=mask,
-                                 dropout=self.dropout)
+        x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout)
 
         # 3) "Concat" using a view and apply a final linear.
-        x = x.transpose(1, 2).contiguous() \
-            .view(nbatches, -1, self.h * self.d_k)
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
         return self.linears[-1](x)
 
 
 class PositionwiseFeedForward(nn.Module):
     "Implements FFN equation."
 
-    def __init__(self, d_model, d_ff, dropout=0.1):
+    def __init__(self, dim_model, dim_feedforward, dropout=0.1):
         super(PositionwiseFeedForward, self).__init__()
-        self.w_1 = nn.Linear(d_model, d_ff)
-        self.w_2 = nn.Linear(d_ff, d_model)
+        self.w_1 = nn.Linear(dim_model, dim_feedforward)
+        self.w_2 = nn.Linear(dim_feedforward, dim_model)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -230,69 +243,85 @@ class PositionalEncoding(nn.Module):
         # Compute the positional encodings once in log space.
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0.0, max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0.0, d_model, 2) *
-                             -(math.log(10000.0) / d_model))
+        div_term = torch.exp(
+            torch.arange(0.0, d_model, 2) * -(math.log(10000.0) / d_model)
+        )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
-        self.register_buffer('pe', pe)
+        self.register_buffer("pe", pe)
 
     def forward(self, x):
-        x = x + Variable(self.pe[:, :x.size(1)],
-                         requires_grad=False)
+        x = x + Variable(self.pe[:, : x.size(1)], requires_grad=False)
         return self.dropout(x)
 
 
 class NoamOpt:
     "Optim wrapper that implements rate."
 
-    def __init__(self, model_size, factor, warmup, optimizer):
+    def __init__(self, dim_model, factor, warmup, optimizer, constant_rate=None):
         self.optimizer = optimizer
         self._step = 0
         self.warmup = warmup
         self.factor = factor
-        self.model_size = model_size
+        self.dim_model = dim_model
         self._rate = 0
+        # if True, use constant rate
+        self.constant_rate = constant_rate
 
     def step(self):
         "Update parameters and rate"
         self._step += 1
         rate = self.rate()
         for p in self.optimizer.param_groups:
-            p['lr'] = rate
+            p["lr"] = rate
         self._rate = rate
         self.optimizer.step()
 
     def rate(self, step=None):
         "Implement `lrate` above"
-        if True:
-            return 0.001
+        if self.constant_rate:
+            return self.constant_rate
         if step is None:
             step = self._step
-        return self.factor * \
-               (self.model_size ** (-0.5) *
-                min(step ** (-0.5), step * self.warmup ** (-1.5)))
+        return self.factor * (
+            self.dim_model ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5))
+        )
 
 
 def get_std_opt(model):
-    return NoamOpt(model.src_embed[0].d_model, 2, 4000,
-                   torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
+    return NoamOpt(
+        model.src_embed[0].d_model,
+        2,
+        4000,
+        torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
+    )
 
 
-def make_model(src_vocab, tgt_vocab, N=6,
-               d_model=512, d_ff=2048, h=8, dropout=0.1):
+def make_model(
+    src_vocab_size,
+    tgt_vocab_size,
+    num_stacked_layers=6,
+    dim_model=512,
+    dim_feedforward=512,
+    num_heads=8,
+    dropout=0.1,
+):
     "Helper: Construct a model from hyperparameters."
     c = copy.deepcopy
-    attn = MultiHeadedAttention(h, d_model)
-    ff = PositionwiseFeedForward(d_model, d_ff, dropout)
-    position = PositionalEncoding(d_model, dropout)
+    attn = MultiHeadedAttention(num_heads, dim_model)
+    ff = PositionwiseFeedForward(dim_model, dim_feedforward, dropout)
+    position = PositionalEncoding(dim_model, dropout)
     model = EncoderDecoder(
-        Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
-        Decoder(DecoderLayer(d_model, c(attn), c(attn),
-                             c(ff), dropout), N),
-        nn.Sequential(Embeddings(d_model, src_vocab), c(position)),
-        nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
-        Generator(d_model, tgt_vocab))
+        Encoder(EncoderLayer(dim_model, c(attn), c(ff), dropout), num_stacked_layers),
+        Decoder(
+            DecoderLayer(dim_model, c(attn), c(attn), c(ff), dropout),
+            num_stacked_layers,
+        ),
+        nn.Sequential(Embeddings(dim_model, src_vocab_size), c(position)),
+        nn.Sequential(Embeddings(dim_model, tgt_vocab_size), c(position)),
+        Generator(dim_model, tgt_vocab_size),
+    )
 
     # This was important from their code.
     # Initialize parameters with Glorot / fan_avg.
@@ -306,25 +335,34 @@ class Batch:
     "Object for holding a batch of data with mask during training."
 
     def __init__(self, src, trg=None, pad=0):
+        # src shape: batch_size, input_dim
+        # tgt shape: batch_size, input_dim
+        # src_mask shape: batch_size, 1, input_dim
         self.src = src
         self.src_mask = (src != pad).unsqueeze(-2)
         if trg is not None:
+            # trg shape: batch_size, input_dim - 1
             self.trg = trg[:, :-1]
+            # trg_y shape: batch_size, input_dim - 1
             self.trg_y = trg[:, 1:]
-            self.trg_mask = \
-                self.make_std_mask(self.trg, pad)
+            # trg_mask shape: batch_size, input_dim-1, input-dim-1
+            self.trg_mask = self.make_std_mask(self.trg, pad)
+            # ntoken shape: batch_size * (input_dim - 1)
             self.ntokens = (self.trg_y != pad).data.sum()
 
     @staticmethod
     def make_std_mask(tgt, pad):
         "Create a mask to hide padding and future words."
+        # tgt shape: batch_size, input_dim-1
+        # tgt_mask shape: batch_size, 1, input_dim-1
         tgt_mask = (tgt != pad).unsqueeze(-2)
-        tgt_mask = tgt_mask & Variable(
-            subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data))
+        subseq_mask = subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data)
+        # tgt_mask shape: batch_size, input_dim-1, input_dim-1
+        tgt_mask = tgt_mask & Variable(subseq_mask)
         return tgt_mask
 
 
-def run_epoch(data_iter, model, loss_compute):
+def run_epoch(epoch, data_iter, model, loss_compute):
     "Standard Training and Logging Function"
     start = time.time()
     total_tokens = 0
@@ -332,27 +370,30 @@ def run_epoch(data_iter, model, loss_compute):
     tokens = 0
     for i, batch in enumerate(data_iter):
         out = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
+        # out shape: batch_size, input_dim-1, dim_model
         loss = loss_compute(out, batch.trg_y, batch.ntokens)
         total_loss += loss.detach().numpy()
         total_tokens += batch.ntokens.numpy()
         tokens += batch.ntokens.numpy()
-        if i % 50 == 1:
+        if i and i % 10 == 9:
             elapsed = time.time() - start
-            print("Epoch Step: %d Loss: %f Tokens per Sec: %f" % (
-            i, loss.detach().numpy() / batch.ntokens.numpy(), tokens / elapsed))
+            print(
+                "Epoch %d Step: %d Loss: %f Tokens per Sec: %f"
+                % (epoch, i, loss.detach().numpy() / batch.ntokens.numpy(), tokens / elapsed)
+            )
             start = time.time()
             tokens = 0
     return total_loss / total_tokens
 
 
-def data_gen(V, batch, nbatches):
+def data_gen(vocab_size, batch_size, num_batches):
     "Generate random data for a src-tgt copy task."
-    for i in range(nbatches):
-        data = torch.from_numpy(np.random.randint(1, V, size=(batch, 10)))
+    for _ in range(num_batches):
+        data = torch.from_numpy(np.random.randint(1, vocab_size, size=(batch_size, 10)))
         data[:, 0] = 1
         src = Variable(data, requires_grad=False)
         tgt = Variable(data, requires_grad=False)
-        yield Batch(src, tgt, 0)
+        yield Batch(src, tgt, pad=0)
 
 
 class SimpleLossCompute:
@@ -365,8 +406,10 @@ class SimpleLossCompute:
 
     def __call__(self, x, y, norm):
         x = self.generator(x)
-        loss = self.criterion(x.contiguous().view(-1, x.size(-1)),
-                              y.contiguous().view(-1)) / norm
+        loss = (
+            self.criterion(x.contiguous().view(-1, x.size(-1)), y.contiguous().view(-1))
+            / norm
+        )
         loss.backward()
         if self.opt is not None:
             self.opt.step()
@@ -377,19 +420,21 @@ class SimpleLossCompute:
 class LabelSmoothing(nn.Module):
     "Implement label smoothing."
 
-    def __init__(self, size, padding_idx, smoothing=0.0):
+    def __init__(self, tgt_vocab_size, padding_idx, smoothing=0.0):
         super(LabelSmoothing, self).__init__()
-        self.criterion = nn.KLDivLoss(reduction='sum')
+        self.criterion = nn.KLDivLoss(reduction="sum")
         self.padding_idx = padding_idx
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
-        self.size = size
+        self.tgt_vocab_size = tgt_vocab_size
         self.true_dist = None
 
     def forward(self, x, target):
-        assert x.size(1) == self.size
+        # x shape: batch_size x tgt_vocab_size
+        # target shape: batch_size
+        assert x.size(1) == self.tgt_vocab_size
         true_dist = x.data.clone()
-        true_dist.fill_(self.smoothing / (self.size - 2))
+        true_dist.fill_(self.smoothing / (self.tgt_vocab_size - 2))
         true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
         true_dist[:, self.padding_idx] = 0
         mask = torch.nonzero(target.data == self.padding_idx)
@@ -399,35 +444,82 @@ class LabelSmoothing(nn.Module):
         return self.criterion(x, Variable(true_dist, requires_grad=False))
 
 
-V = 11
-criterion = LabelSmoothing(size=V, padding_idx=0, smoothing=0.0)
-model = make_model(V, V, N=2)
-model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
-                    torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
+# # Test LabelSmoothing
+# crit = LabelSmoothing(tgt_vocab_size=5, padding_idx=0, smoothing=0.0)
+# pred = torch.tensor([[0, 0.9, 0.1, 0, 0]], dtype=torch.float32)
+# label = torch.tensor([1], dtype=torch.long)
+# print(crit(pred, label), crit.true_dist)
+# pred = torch.tensor([[0, 0.7, 0.1, 0.1, 0.1]], dtype=torch.float32)
+# label = torch.tensor([1], dtype=torch.long)
+# print(crit(pred, label), crit.true_dist)
+#
+# crit = LabelSmoothing(tgt_vocab_size=5, padding_idx=0, smoothing=0.3)
+# pred = torch.tensor([[0, 0.7, 0.1, 0.1, 0.1]], dtype=torch.float32)
+# label = torch.tensor([1], dtype=torch.long)
+# print(crit(pred, label), crit.true_dist)
 
-for epoch in range(40):
+
+# src vocab size equals to tgt vocab size
+VOCAB_SIZE = 11
+EPOCH_NUM = 6
+DIM_MODEL = 512
+DIM_FEEDFORWARD = 256
+NUM_STACKED_LAYERS = 2
+NUM_HEADS = 8
+BATCH_SIZE = 30
+NUM_TRAIN_BATCHES = 50
+NUM_EVAL_BATCHES = 5
+
+criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=0, smoothing=0.0)
+model = make_model(
+    src_vocab_size=VOCAB_SIZE,
+    tgt_vocab_size=VOCAB_SIZE,
+    num_stacked_layers=NUM_STACKED_LAYERS,
+    dim_model=DIM_MODEL,
+    dim_feedforward=DIM_FEEDFORWARD,
+    num_heads=NUM_HEADS,
+)
+model_opt = NoamOpt(
+    dim_model=DIM_MODEL,
+    factor=1,
+    warmup=400,
+    optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
+)
+
+for epoch in range(EPOCH_NUM):
     model.train()
-    print(f"Epoch {epoch}")
-    run_epoch(data_gen(V, 30, 20), model,
-              SimpleLossCompute(model.generator, criterion, model_opt))
+    run_epoch(
+        epoch,
+        data_gen(vocab_size=VOCAB_SIZE, batch_size=BATCH_SIZE, num_batches=NUM_TRAIN_BATCHES),
+        model,
+        SimpleLossCompute(model.generator, criterion, model_opt),
+    )
     model.eval()
-    print("eval loss:", run_epoch(data_gen(V, 30, 5), model,
-                                  SimpleLossCompute(model.generator, criterion, None)))
+    print(
+        "eval loss:",
+        run_epoch(
+            epoch,
+            data_gen(vocab_size=VOCAB_SIZE, batch_size=BATCH_SIZE, num_batches=NUM_EVAL_BATCHES),
+            model,
+            SimpleLossCompute(model.generator, criterion, None),
+        ),
+    )
 
 
 def greedy_decode(model, src, src_mask, max_len, start_symbol):
     memory = model.encode(src, src_mask)
     ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
-    for i in range(max_len - 1):
-        out = model.decode(memory, src_mask,
-                           Variable(ys),
-                           Variable(subsequent_mask(ys.size(1))
-                                    .type_as(src.data)))
+    for _ in range(max_len - 1):
+        out = model.decode(
+            memory,
+            src_mask,
+            Variable(ys),
+            Variable(subsequent_mask(ys.size(1)).type_as(src.data)),
+        )
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.data[0]
-        ys = torch.cat([ys,
-                        torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
+        ys = torch.cat([ys, torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
     return ys
 
 
