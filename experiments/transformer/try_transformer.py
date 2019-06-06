@@ -62,24 +62,26 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, src, tgt, src_mask, tgt_mask):
         "Take in and process masked src and target sequences."
-        # encode_output shape: batch_size, input_dim, dim_model
+        # encode_output shape: batch_size, seq_len, dim_model
         encode_output = self.encode(src, src_mask)
-        return self.decode(encode_output, src_mask, tgt, tgt_mask)
+        decode_output = self.decode(encode_output, src_mask, tgt, tgt_mask)
+        return decode_output
 
     def encode(self, src, src_mask):
-        # src shape: batch_size, input_dim
-        # src_mask shape: batch_size, 1, input_dim
-        # src_embed: batch_size, input_dim, dim_model
+        # src shape: batch_size, seq_len
+        # src_mask shape: batch_size, 1, seq_len
+        # src_embed: batch_size, seq_len, dim_model
         src_embed = self.src_embed(src)
         return self.encoder(src_embed, src_mask)
 
     def decode(self, memory, src_mask, tgt, tgt_mask):
-        # memory shape: batch_size, input_dim, dim_model
-        # src_mask shape: batch_size, 1, input_dim
-        # tgt shape: batch_size, input_dim - 1
-        # tgt_mask shape: batch_size, input_dim-1, input_dim-1
-        # tgt_embed shape: batch_size, input_dim-1, dim_model
+        # memory shape: batch_size, seq_len, dim_model
+        # src_mask shape: batch_size, 1, seq_len
+        # tgt shape: batch_size, seq_len - 1
+        # tgt_mask shape: batch_size, seq_len-1, seq_len-1
+        # tgt_embed shape: batch_size, seq_len-1, dim_model
         tgt_embed = self.tgt_embed(tgt)
+        # return type: batch_size, seq_len-1, dim_model
         return self.decoder(tgt_embed, memory, src_mask, tgt_mask)
 
 
@@ -135,19 +137,22 @@ class EncoderLayer(nn.Module):
         self.dim_model = dim_model
 
     def forward(self, src_embed, src_mask):
-        "Follow Figure 1 (left) for connections."
+        # src_mask shape: batch_size, 1, seq_len
         def self_attn_layer(x):
             return self.self_attn(x, x, x, src_mask)
-        src_embed = self.sublayer[0](src_embed, self_attn_layer)
-        return self.sublayer[1](src_embed, self.feed_forward)
+
+        # attn_output shape: batch_size, seq_len, dim_model
+        attn_output = self.sublayer[0](src_embed, self_attn_layer)
+        # return shape: batch_size, seq_len, dim_model
+        return self.sublayer[1](attn_output, self.feed_forward)
 
 
 class Decoder(nn.Module):
-    "Generic N layer decoder with masking."
+    "Generic num_layers layer decoder with masking."
 
-    def __init__(self, layer, N):
+    def __init__(self, layer, num_layers):
         super(Decoder, self).__init__()
-        self.layers = clones(layer, N)
+        self.layers = clones(layer, num_layers)
         self.norm = LayerNorm(layer.size)
 
     def forward(self, x, memory, src_mask, tgt_mask):
@@ -168,10 +173,18 @@ class DecoderLayer(nn.Module):
         self.sublayer = clones(SublayerConnection(size), 3)
 
     def forward(self, x, memory, src_mask, tgt_mask):
-        "Follow Figure 1 (right) for connections."
+        # memory shape: batch_size, seq_len, dim_model
+        # tgt_mask shape: batch_size, seq_len-1, seq_len-1
         m = memory
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
-        x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
+
+        def self_attn_layer_tgt(x):
+            return self.self_attn(x, x, x, tgt_mask)
+
+        def self_attn_layer_src(x):
+            return self.self_attn(x, m, m, src_mask)
+
+        x = self.sublayer[0](x, self_attn_layer_tgt)
+        x = self.sublayer[1](x, self_attn_layer_src)
         return self.sublayer[2](x, self.feed_forward)
 
 
@@ -190,19 +203,28 @@ class MultiHeadedAttention(nn.Module):
         "Implements Figure 2"
         if mask is not None:
             # Same mask applied to all num_heads heads.
+            # mask shape: batch_size, 1, 1, seq_len
             mask = mask.unsqueeze(1)
         nbatches = query.size(0)
 
-        # 1) Do all the linear projections in batch from dim_model => h x d_k
+        # 1) Do all the linear projections in batch from dim_model => num_heads x d_k
+        # self.linear[0, 1, 2] is query weight matrix, key weight matrix, and value weight matrix, respectively
+        # l(x) represents the transformed query matrix, key matrix and value matrix
+        # l(x) has shape batch_size, seq_len, dim_model. You can think l(x) as the matrices from a one-head attention
+        # or after view() and transform(), it has shape batch_size, num_heads, seq_len, d_k, so that you
+        # can think l(x) as the matrices of num_heads attentions, each attention has d_k dimension.
         query, key, value = [
             l(x).view(nbatches, -1, self.num_heads, self.d_k).transpose(1, 2)
             for l, x in zip(self.linears, (query, key, value))
         ]
 
         # 2) Apply attention on all the projected vectors in batch.
+        # x shape: batch_size, num_heads, seq_len, d_k
         x, self.attn = attention(query, key, value, mask=mask)
 
         # 3) "Concat" using a view and apply a final linear.
+        # each attention's output is d_k dimension. Concat num_heads attention's outputs
+        # x shape: batch_size, seq_len, dim_model
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.num_heads * self.d_k)
         return self.linears[-1](x)
 
@@ -249,6 +271,7 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         x = x + Variable(self.pe[:, : x.size(1)], requires_grad=False)
         return x
+
 
 class NoamOpt:
     "Optim wrapper that implements rate."
@@ -307,13 +330,10 @@ def make_model(
     position = PositionalEncoding(dim_model)
     model = EncoderDecoder(
         Encoder(EncoderLayer(dim_model, c(attn), c(ff)), num_stacked_layers),
-        Decoder(
-            DecoderLayer(dim_model, c(attn), c(attn), c(ff)),
-            num_stacked_layers,
-        ),
-        nn.Sequential(Embeddings(dim_model, src_vocab_size), c(position)),
-        nn.Sequential(Embeddings(dim_model, tgt_vocab_size), c(position)),
-        Generator(dim_model, tgt_vocab_size),
+        Decoder(DecoderLayer(dim_model, c(attn), c(attn), c(ff)), num_stacked_layers),
+        src_embed=nn.Sequential(Embeddings(dim_model, src_vocab_size), c(position)),
+        tgt_embed=nn.Sequential(Embeddings(dim_model, tgt_vocab_size), c(position)),
+        generator=Generator(dim_model, tgt_vocab_size),
     )
 
     # This was important from their code.
@@ -328,29 +348,29 @@ class Batch:
     "Object for holding a batch of data with mask during training."
 
     def __init__(self, src, trg=None, pad=0):
-        # src shape: batch_size, input_dim
-        # tgt shape: batch_size, input_dim
-        # src_mask shape: batch_size, 1, input_dim
+        # src shape: batch_size, seq_len
+        # tgt shape: batch_size, seq_len
+        # src_mask shape: batch_size, 1, seq_len
         self.src = src
         self.src_mask = (src != pad).unsqueeze(-2)
         if trg is not None:
-            # trg shape: batch_size, input_dim - 1
+            # trg shape: batch_size, seq_len - 1
             self.trg = trg[:, :-1]
-            # trg_y shape: batch_size, input_dim - 1
+            # trg_y shape: batch_size, seq_len - 1
             self.trg_y = trg[:, 1:]
-            # trg_mask shape: batch_size, input_dim-1, input-dim-1
+            # trg_mask shape: batch_size, seq_len-1, input-dim-1
             self.trg_mask = self.make_std_mask(self.trg, pad)
-            # ntoken shape: batch_size * (input_dim - 1)
+            # ntoken shape: batch_size * (seq_len - 1)
             self.ntokens = (self.trg_y != pad).data.sum()
 
     @staticmethod
     def make_std_mask(tgt, pad):
         "Create a mask to hide padding and future words."
-        # tgt shape: batch_size, input_dim-1
-        # tgt_mask shape: batch_size, 1, input_dim-1
+        # tgt shape: batch_size, seq_len-1
+        # tgt_mask shape: batch_size, 1, seq_len-1
         tgt_mask = (tgt != pad).unsqueeze(-2)
         subseq_mask = subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data)
-        # tgt_mask shape: batch_size, input_dim-1, input_dim-1
+        # tgt_mask shape: batch_size, seq_len-1, seq_len-1
         tgt_mask = tgt_mask & Variable(subseq_mask)
         return tgt_mask
 
@@ -363,7 +383,7 @@ def run_epoch(epoch, data_iter, model, loss_compute):
     tokens = 0
     for i, batch in enumerate(data_iter):
         out = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
-        # out shape: batch_size, input_dim-1, dim_model
+        # out shape: batch_size, seq_len-1, dim_model
         loss = loss_compute(out, batch.trg_y, batch.ntokens)
         total_loss += loss.detach().numpy()
         total_tokens += batch.ntokens.numpy()
@@ -372,20 +392,33 @@ def run_epoch(epoch, data_iter, model, loss_compute):
             elapsed = time.time() - start
             print(
                 "Epoch %d Step: %d Loss: %f Tokens per Sec: %f"
-                % (epoch, i, loss.detach().numpy() / batch.ntokens.numpy(), tokens / elapsed)
+                % (
+                    epoch,
+                    i,
+                    loss.detach().numpy() / batch.ntokens.numpy(),
+                    tokens / elapsed,
+                )
             )
             start = time.time()
             tokens = 0
     return total_loss / total_tokens
 
 
-def data_gen(vocab_size, batch_size, num_batches):
+def data_gen(vocab_size, batch_size, num_batches, seq_len, start_symbol):
     "Generate random data for a src-tgt copy task."
     for _ in range(num_batches):
-        data = torch.from_numpy(np.random.randint(1, vocab_size, size=(batch_size, 10)))
-        data[:, 0] = 1
-        src = Variable(data, requires_grad=False)
+        # symbol 0 is used for padding and symbol 1 is used for starting symbol. So we start from 2
+        data = torch.from_numpy(
+            np.random.randint(2, vocab_size, size=(batch_size, seq_len + 1))
+        )
+        # the first column is starting symbol, used to kick off the decoder
+        # the last seq_len columns are real sequence data in shape: batch_size, seq_len
+        data[:, 0] = start_symbol
+        src = Variable(data[:, 1:], requires_grad=False)
         tgt = Variable(data, requires_grad=False)
+        # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
+        # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
+        # trg is used to generate target masks and embeddings, trg_y is used as labels
         yield Batch(src, tgt, pad=0)
 
 
@@ -453,8 +486,12 @@ class LabelSmoothing(nn.Module):
 
 
 # src vocab size equals to tgt vocab size
-VOCAB_SIZE = 11
-EPOCH_NUM = 6
+# vocab symbol includes padding symbol (0) and sequence starting symbol (1)
+PADDING_SYMBOL = 0
+START_SYMBOL = 1
+VOCAB_SIZE = 10 + 1 + 1
+SEQ_LEN = 7
+EPOCH_NUM = 5
 DIM_MODEL = 512
 DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
@@ -483,7 +520,13 @@ for epoch in range(EPOCH_NUM):
     model.train()
     run_epoch(
         epoch,
-        data_gen(vocab_size=VOCAB_SIZE, batch_size=BATCH_SIZE, num_batches=NUM_TRAIN_BATCHES),
+        data_gen(
+            vocab_size=VOCAB_SIZE,
+            batch_size=BATCH_SIZE,
+            num_batches=NUM_TRAIN_BATCHES,
+            seq_len=SEQ_LEN,
+            start_symbol=START_SYMBOL,
+        ),
         model,
         SimpleLossCompute(model.generator, criterion, model_opt),
     )
@@ -492,22 +535,28 @@ for epoch in range(EPOCH_NUM):
         "eval loss:",
         run_epoch(
             epoch,
-            data_gen(vocab_size=VOCAB_SIZE, batch_size=BATCH_SIZE, num_batches=NUM_EVAL_BATCHES),
+            data_gen(
+                vocab_size=VOCAB_SIZE,
+                batch_size=BATCH_SIZE,
+                num_batches=NUM_EVAL_BATCHES,
+                seq_len=SEQ_LEN,
+                start_symbol=START_SYMBOL,
+            ),
             model,
             SimpleLossCompute(model.generator, criterion, None),
         ),
     )
 
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol):
+def greedy_decode(model, src, src_mask, max_len):
     memory = model.encode(src, src_mask)
-    ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
-    for _ in range(max_len - 1):
+    ys = torch.ones(1, 1).fill_(START_SYMBOL).type_as(src.data)
+    for _ in range(max_len):
         out = model.decode(
-            memory,
-            src_mask,
-            Variable(ys),
-            Variable(subsequent_mask(ys.size(1)).type_as(src.data)),
+            memory=memory,
+            src_mask=src_mask,
+            tgt=Variable(ys),
+            tgt_mask=Variable(subsequent_mask(ys.size(1)).type_as(src.data)),
         )
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
@@ -517,6 +566,8 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
 
 
 model.eval()
-src = Variable(torch.LongTensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]))
-src_mask = Variable(torch.ones(1, 1, 10))
-print(greedy_decode(model, src, src_mask, max_len=10, start_symbol=1))
+src = Variable(torch.LongTensor([[2, 3, 4, 5, 6, 7, 8]]))
+src_mask = Variable(torch.ones(1, 1, SEQ_LEN))
+output_tgt = greedy_decode(model, src, src_mask, max_len=SEQ_LEN)
+print(f"input seq: {src}")
+print(f"output seq: {output_tgt}")
