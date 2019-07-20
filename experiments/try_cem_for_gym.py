@@ -115,7 +115,7 @@ class CEMPlannerNetwork(nn.Module):
 
         # CZXTTKL
         # np.set_printoptions(threshold=100000)
-        print(f"{reward_vec}")
+        # print(f"{reward_vec}")
         return np.sum(reward_vec)
 
     def acc_rewards_of_all_solutions(
@@ -133,7 +133,7 @@ class CEMPlannerNetwork(nn.Module):
         for i in range(self.cem_pop_size):
             # czxttkl
             discrete_solution = np.argmax(solutions[i], axis=1)
-            print(f"Obtaining {i}-th solution {discrete_solution} reward")
+            # print(f"Obtaining {i}-th solution {discrete_solution} reward")
             acc_reward_vec[i] = self.acc_rewards_of_one_solution(
                 init_state, solutions[i], i
             )
@@ -209,7 +209,7 @@ class CEMPlannerNetwork(nn.Module):
         for action_seq, acc_reward in zip(random_action_seqs, acc_rewards):
             first_action = action_seq[0]
             first_action_tally[first_action] += 1
-            reward_tally[first_action] = acc_reward
+            reward_tally[first_action] += acc_reward
 
         best_next_action_idx = np.nanargmax(reward_tally / first_action_tally)
         best_next_action_one_hot = np.zeros(self.action_dim)
@@ -222,13 +222,13 @@ class CEMPlannerNetwork(nn.Module):
         return best_next_action_idx, best_next_action_one_hot
 
 
-def test_cem(env, test_episodes):
+def test_cem(env, test_episodes, cem_pop_size, plan_horizon):
     cem_planner_network = CEMPlannerNetwork(
         env,
         cem_num_iterations=10,
-        cem_population_size=500,
+        cem_population_size=cem_pop_size,
         num_elites=50,
-        plan_horizon_length=10,
+        plan_horizon_length=plan_horizon,
         state_dim=4,
         action_dim=2,
         discrete_action=True,
@@ -237,15 +237,23 @@ def test_cem(env, test_episodes):
         epsilon=0.001,
     )
 
+    steps = []
     for i_episode in range(test_episodes):
         observation = env.reset()
         for t in range(1000):
-            print(f"\nRun {i_episode}-th episode {t}-th step:")
+            print(f"\nRun {i_episode}-th episode {t}-th step: {observation}")
             action, _ = cem_planner_network(PlanningPolicyInput(state=observation))
             observation, reward, done, info = env.step(action)
             if done:
                 print("Episode finished after {} timesteps".format(t + 1))
+                steps.append(t+1)
                 break
+
+    with open("try_cem_for_gym.txt", "a") as f:
+        write_str = f"TEST_EPISODES={test_episodes}, CEM_POP_SIZE={cem_pop_size}, PLAN_HORIZON={plan_horizon}" \
+                    f", STEP={np.mean(steps)}\n"
+        print(write_str)
+        f.write(write_str)
 
 
 if __name__ == "__main__":
@@ -270,8 +278,10 @@ if __name__ == "__main__":
     print("recovered next state", recovered_next_state)
     assert np.all(next_state == recovered_next_state)
 
-    TEST_TIMES = 1
-    test_cem(env, TEST_TIMES)
+    TEST_EPISODES = 5
+    CEM_POP_SIZE = 2000
+    PLAN_HORIZON = 10
+    test_cem(env, TEST_EPISODES, CEM_POP_SIZE, PLAN_HORIZON)
 
 
 
