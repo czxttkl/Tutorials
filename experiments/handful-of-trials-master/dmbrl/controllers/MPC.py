@@ -317,6 +317,9 @@ class MPC(Controller):
 
     def _predict_next_obs(self, obs, acs):
         proc_obs = self.obs_preproc(obs)
+        tf.print(proc_obs, [proc_obs])
+        print(proc_obs)
+
 
         if self.model.is_tf_model:
             # TS Optimization: Expand so that particles are only passed through one of the networks.
