@@ -48,5 +48,5 @@ def test_solution_lunarlander():
 
 
 if __name__ == "__main__":
-    test_solution_cartpole()
-    # test_solution_lunarlander()
+    # test_solution_cartpole()
+    test_solution_lunarlander()

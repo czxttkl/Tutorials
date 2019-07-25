@@ -216,9 +216,9 @@ if __name__ == '__main__':
 
     # model_str = 'lstm'
     model_str = 'dqn'
-    env_str = 'finite'
+    # env_str = 'finite'
     # env_str = 'rnn'
-    # env_str = "lunar"
+    env_str = "lunar"
     # env_str = "cartpole"
 
     train_main(

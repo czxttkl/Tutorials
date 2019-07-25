@@ -9,13 +9,13 @@ for d in envs.registry.all():
         print("action space", env.action_space)
         print("observation space", env.observation_space)
         print("observation space shape", env.observation_space.shape)
-        if isinstance(env.action_space,  gym.spaces.Discrete) \
+        if isinstance(env.action_space,  gym.spaces.Box) \
                 and isinstance(env.observation_space,  gym.spaces.Box)\
                 and len(env.observation_space.shape) == 1:
             print('-----good-----')
             print(env.action_space.sample())
             print(env.observation_space.sample())
             print('-------------')
-    except:
-        print("not successful")
+    except Exception as e:
+        print("not successful", e)
     print()

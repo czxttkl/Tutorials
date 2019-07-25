@@ -1,3 +1,8 @@
+""" Check CEM algorithm by using the environment itself as the perfect simulator
+This one checks the continuous domain. And for many continuous domains, it is not possible to pickle them.
+So the best way is to clone an environment, reset using the same seed, and perform all previous actions.
+This 100% restore states but is very slow """
+
 from typing import Optional, NamedTuple, Tuple
 import itertools
 import random
@@ -21,10 +26,30 @@ class PlanningPolicyInput(NamedTuple):
     state: np.ndarray
 
 
+def my_step(env, action):
+    env.action_seqs.append(action)
+    return env.step(action)
+
+
+def reset_env(env, i_episode):
+    env.seed(i_episode)
+    env.my_own_seed = i_episode
+    env.action_seqs = []
+    return env.reset()
+
+
+def copy_env(env):
+    new_env = copy.deepcopy(env)
+    new_env.seed(new_env.my_own_seed)
+    new_env.reset()
+    for act in env.action_seqs:
+        new_env.step(act)
+    return new_env
+
+
 class CEMPlannerNetwork(nn.Module):
     def __init__(
         self,
-        env,
         cem_num_iterations: int,
         cem_population_size: int,
         num_elites: int,
@@ -39,7 +64,6 @@ class CEMPlannerNetwork(nn.Module):
         action_lower_bounds: Optional[np.ndarray] = None,
     ):
         """
-        :param env: open ai gym environment
         :param cem_num_iterations: The maximum number of iterations for searching the best action
         :param cem_population_size: The number of candidate solutions to evaluate in each CEM iteration
         :param num_elites: The number of elites kept to refine solutions in each iteration
@@ -56,7 +80,6 @@ class CEMPlannerNetwork(nn.Module):
             Only effective when discrete_action=False.
         """
         super().__init__()
-        self.env = env
         self.cem_num_iterations = cem_num_iterations
         self.cem_pop_size = cem_population_size
         self.num_elites = num_elites
@@ -79,14 +102,14 @@ class CEMPlannerNetwork(nn.Module):
                 action_lower_bounds, self.plan_horizon_length
             )
 
-    def forward(self, input: PlanningPolicyInput):
+    def forward(self, input: PlanningPolicyInput, env):
         assert input.state.shape == (self.state_dim, )
         if self.discrete_action:
             return self.discrete_planning(input)
-        return self.continuous_planning(input)
+        return self.continuous_planning(input, env)
 
     def acc_rewards_of_one_solution(
-        self, init_state: np.ndarray, solution: np.ndarray, solution_idx: int
+        self, init_state: np.ndarray, solution: np.ndarray, solution_idx: int, env
     ):
         """
         one trajectory will be sampled to evaluate a
@@ -106,7 +129,7 @@ class CEMPlannerNetwork(nn.Module):
                 action=solution[j, :],
             )
             reward, next_state, not_terminal = self.sample_reward_next_state_terminal(
-                env_input
+                env_input, env
             )
             reward_vec[j] = reward * (self.gamma ** j)
             if not not_terminal:
@@ -119,7 +142,7 @@ class CEMPlannerNetwork(nn.Module):
         return np.sum(reward_vec)
 
     def acc_rewards_of_all_solutions(
-        self, input: PlanningPolicyInput, solutions: np.ndarray
+        self, input: PlanningPolicyInput, solutions: np.ndarray, env
     ) -> float:
         """
         Calculate accumulated rewards of solutions.
@@ -131,22 +154,18 @@ class CEMPlannerNetwork(nn.Module):
         acc_reward_vec = np.zeros(self.cem_pop_size)
         init_state = input.state
         for i in range(self.cem_pop_size):
-            # czxttkl
-            discrete_solution = np.argmax(solutions[i], axis=1)
-            # print(f"Obtaining {i}-th solution {discrete_solution} reward")
+            copied_env = copy_env(env)
             acc_reward_vec[i] = self.acc_rewards_of_one_solution(
-                init_state, solutions[i], i
+                init_state, solutions[i], i, copied_env
             )
+            del copied_env
         return acc_reward_vec
 
     def sample_reward_next_state_terminal(
-        self, env_input: StateAction
+        self, env_input: StateAction, env
     ):
         """ Sample one-step dynamics based on the provided env """
-        env = copy.deepcopy(self.env)
-        env.env.state = env_input.state
-        action_idx = np.argmax(env_input.action)
-        next_state, reward, terminal, _ = env.step(action_idx)
+        next_state, reward, terminal, _ = my_step(env, env_input.action)
         not_terminal = not terminal
         return reward, next_state, not_terminal
 
@@ -157,14 +176,14 @@ class CEMPlannerNetwork(nn.Module):
         )
         return np.minimum(np.minimum((lb_dist / 2) ** 2, (ub_dist / 2) ** 2), var)
 
-    def continuous_planning(self, input: PlanningPolicyInput) -> np.ndarray:
+    def continuous_planning(self, input: PlanningPolicyInput, env) -> np.ndarray:
         mean = (self.action_upper_bounds + self.action_lower_bounds) / 2
         var = (self.action_upper_bounds - self.action_lower_bounds) ** 2 / 16
         normal_sampler = stats.truncnorm(
             -2, 2, loc=np.zeros_like(mean), scale=np.ones_like(mean)
         )
 
-        for _ in range(self.cem_num_iterations):
+        for i in range(self.cem_num_iterations):
             const_var = self.constrained_variance(mean, var)
             solutions = (
                 normal_sampler.rvs(
@@ -177,7 +196,9 @@ class CEMPlannerNetwork(nn.Module):
                 (self.cem_pop_size, self.plan_horizon_length, self.action_dim)
             )
 
-            acc_rewards = self.acc_rewards_of_all_solutions(input, action_solutions)
+            acc_rewards = self.acc_rewards_of_all_solutions(input, action_solutions, env)
+            elite_mean_reward = np.mean(np.sort(acc_rewards)[-self.num_elites:])
+            print(f"{i}-th iteration mean elite reward {elite_mean_reward}")
             elites = solutions[np.argsort(acc_rewards)][-self.num_elites:]
             new_mean = np.mean(elites, axis=0)
             new_var = np.var(elites, axis=0)
@@ -185,6 +206,7 @@ class CEMPlannerNetwork(nn.Module):
             var = self.alpha * var + (1 - self.alpha) * new_var
 
             if np.max(var) <= self.epsilon:
+                print("break because var")
                 break
 
         # Pick the first action of the optimal solution
@@ -225,7 +247,7 @@ class CEMPlannerNetwork(nn.Module):
         return best_next_action_idx, best_next_action_one_hot
 
 
-def test_cem(env, test_episodes, cem_pop_size, plan_horizon):
+def try_cem(env, test_episodes, cem_pop_size, num_elites, plan_horizon, cem_num_iterations):
     if isinstance(env.action_space, gym.spaces.Discrete):
         discrete_action = True
         action_dim = env.action_space.n
@@ -235,10 +257,9 @@ def test_cem(env, test_episodes, cem_pop_size, plan_horizon):
     state_dim = env.observation_space.shape[0]
 
     cem_planner_network = CEMPlannerNetwork(
-        env,
-        cem_num_iterations=10,
+        cem_num_iterations=cem_num_iterations,
         cem_population_size=cem_pop_size,
-        num_elites=50,
+        num_elites=num_elites,
         plan_horizon_length=plan_horizon,
         state_dim=state_dim,
         action_dim=action_dim,
@@ -246,53 +267,56 @@ def test_cem(env, test_episodes, cem_pop_size, plan_horizon):
         gamma=1.0,
         alpha=0.25,
         epsilon=0.001,
+        action_lower_bounds=env.action_space.low,
+        action_upper_bounds=env.action_space.high,
     )
 
-    steps = []
+    all_episodes_rewards = []
     for i_episode in range(test_episodes):
-        observation = env.reset()
+        # observation = env.reset()
+        observation = reset_env(env, i_episode)
+        episode_rewards = []
         for t in range(1000):
-            print(f"\nRun {i_episode}-th episode {t}-th step: {observation}")
-            action, _ = cem_planner_network(PlanningPolicyInput(state=observation))
-            observation, reward, done, info = env.step(action)
+            print(f"\nRun {i_episode}-th episode {t}-th step  {observation}")
+            action = cem_planner_network(PlanningPolicyInput(state=observation), env)
+            observation, reward, done, info = my_step(env, action)
+            print(f"reward: {reward}, acc: {np.sum(episode_rewards)}\n")
+            episode_rewards.append(reward)
             if done:
-                print("Episode finished after {} timesteps".format(t + 1))
-                steps.append(t+1)
+                print("Episode finished after with {} reward".format(np.sum(episode_rewards)))
+                all_episodes_rewards.append(np.sum(episode_rewards))
                 break
 
     with open("try_cem_for_gym.txt", "a") as f:
-        write_str = f"TEST_EPISODES={test_episodes}, CEM_POP_SIZE={cem_pop_size}, PLAN_HORIZON={plan_horizon}" \
-                    f", STEP={np.mean(steps)}\n"
+        write_str = f"TEST_EPISODES={test_episodes}, CEM_POP_SIZE={cem_pop_size}, NUM_ELITES={num_elites}, PLAN_HORIZON={plan_horizon}, CEM_ITERATIONS={cem_num_iterations}" \
+                    f", REWARD={np.mean(all_episodes_rewards)}\n"
         print(write_str)
         f.write(write_str)
 
 
 if __name__ == "__main__":
     # Test env state can be recovered
-    env = gym.make("CartPole-v0")
-    env.seed(0)
-    cur_state = env.reset()
-    print("cur_state", cur_state)
-    print("env.env.state", env.env.state)
-    next_state, reward, done, info = env.step(1)
-    print("next state", next_state)
-    next_next_state, reward, done, info = env.step(1)
-    print("next next state", next_next_state)
+    # LunarLanderContinuous-v2 can't pickle box2d
+    env = gym.make("LunarLanderContinuous-v2")
+    # env = gym.make("HalfCheetah-v2")
+    reset_env(env, 100000)
 
-    env.env.state = next_state
-    recovered_next_next_state, reward, done, info = env.step(1)
-    print("recovered next next state", recovered_next_next_state)
-    assert np.all(next_next_state == recovered_next_next_state)
+    action = np.array([0.5355514, 0.8776801])
+    next_state, reward, done, _ = my_step(env, action)
+    copied_env = copy_env(env)
+    next_action = np.array([0.59657073, 0.5156559])
+    next_next_state, reward, done, _ = my_step(env, next_action)
+    print(f"next next state {next_next_state}")
+    copied_next_next_state, reward, done, _ = my_step(copied_env, next_action)
+    print(f"copied next next state {copied_next_next_state}")
+    assert np.all(np.equal(copied_next_next_state, next_next_state))
 
-    env.env.state = cur_state
-    recovered_next_state, reward, done, info = env.step(1)
-    print("recovered next state", recovered_next_state)
-    assert np.all(next_state == recovered_next_state)
-
-    TEST_EPISODES = 5
-    CEM_POP_SIZE = 50
-    PLAN_HORIZON = 10
-    test_cem(env, TEST_EPISODES, CEM_POP_SIZE, PLAN_HORIZON)
+    TEST_EPISODES = 1
+    CEM_POP_SIZE = 300
+    PLAN_HORIZON = 15
+    NUM_ELITES = 30
+    CEM_NUM_ITERATIONS = 15
+    try_cem(env, TEST_EPISODES, CEM_POP_SIZE, NUM_ELITES, PLAN_HORIZON, CEM_NUM_ITERATIONS)
 
 
 
