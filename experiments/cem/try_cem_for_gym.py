@@ -67,6 +67,7 @@ class CEMPlannerNetwork(nn.Module):
         self.alpha = alpha
         self.epsilon = epsilon
         self.discrete_action = discrete_action
+        assert self.cem_pop_size > self.num_elites
         if not self.discrete_action:
             assert (
                 action_upper_bounds.shape == action_lower_bounds.shape == (action_dim,)
@@ -145,8 +146,11 @@ class CEMPlannerNetwork(nn.Module):
         """ Sample one-step dynamics based on the provided env """
         env = copy.deepcopy(self.env)
         env.env.state = env_input.state
-        action_idx = np.argmax(env_input.action)
-        next_state, reward, terminal, _ = env.step(action_idx)
+        if self.discrete_action:
+            action = np.argmax(env_input.action)
+        else:
+            action = env_input.action
+        next_state, reward, terminal, _ = env.step(action)
         not_terminal = not terminal
         return reward, next_state, not_terminal
 
@@ -238,7 +242,7 @@ def test_cem(env, test_episodes, cem_pop_size, plan_horizon):
         env,
         cem_num_iterations=10,
         cem_population_size=cem_pop_size,
-        num_elites=50,
+        num_elites=10,
         plan_horizon_length=plan_horizon,
         state_dim=state_dim,
         action_dim=action_dim,
@@ -253,7 +257,9 @@ def test_cem(env, test_episodes, cem_pop_size, plan_horizon):
         observation = env.reset()
         for t in range(1000):
             print(f"\nRun {i_episode}-th episode {t}-th step: {observation}")
-            action, _ = cem_planner_network(PlanningPolicyInput(state=observation))
+            action = cem_planner_network(PlanningPolicyInput(state=observation))
+            if discrete_action:
+                action = action[0]
             observation, reward, done, info = env.step(action)
             if done:
                 print("Episode finished after {} timesteps".format(t + 1))

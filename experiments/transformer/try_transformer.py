@@ -405,7 +405,9 @@ def run_epoch(epoch, data_iter, model, loss_compute):
 
 
 def data_gen(vocab_size, batch_size, num_batches, seq_len, start_symbol):
-    "Generate random data for a src-tgt copy task."
+    """
+    Generate random data for a src-tgt copy task.
+    """
     for _ in range(num_batches):
         # symbol 0 is used for padding and symbol 1 is used for starting symbol. So we start from 2
         data = torch.from_numpy(
