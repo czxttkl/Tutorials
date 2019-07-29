@@ -28,7 +28,12 @@ def attention(query, key, value, mask=None):
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
     p_attn = F.softmax(scores, dim=-1)
-    return torch.matmul(p_attn, value), p_attn
+    attn = torch.matmul(p_attn, value)
+    # scores shape: batch_size x num_heads x seq_len x seq_len
+    # p_attn shape: batch_size x num_heads x seq_len x seq_len
+    # attn shape: batch_size x num_heads x seq_len x d_k
+    # mask shape: batch_size x 1 x seq_len x seq_len
+    return attn, p_attn
 
 
 class LayerNorm(nn.Module):
@@ -69,19 +74,21 @@ class EncoderDecoder(nn.Module):
 
     def encode(self, src, src_mask):
         # src shape: batch_size, seq_len
-        # src_mask shape: batch_size, 1, seq_len
+        # src_mask shape: batch_size, seq_len, seq_len
         # src_embed: batch_size, seq_len, dim_model
         src_embed = self.src_embed(src)
         return self.encoder(src_embed, src_mask)
 
     def decode(self, memory, src_mask, tgt, tgt_mask):
+        # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
-        # src_mask shape: batch_size, 1, seq_len
-        # tgt shape: batch_size, seq_len - 1
-        # tgt_mask shape: batch_size, seq_len-1, seq_len-1
-        # tgt_embed shape: batch_size, seq_len-1, dim_model
+
+        # src_mask shape: batch_size, seq_len, seq_len
+        # tgt shape: batch_size, seq_len
+        # tgt_mask shape: batch_size, seq_len, seq_len
+        # tgt_embed shape: batch_size, seq_len, dim_model
         tgt_embed = self.tgt_embed(tgt)
-        # return type: batch_size, seq_len-1, dim_model
+        # return type: batch_size, seq_len, dim_model
         return self.decoder(tgt_embed, memory, src_mask, tgt_mask)
 
 
@@ -137,7 +144,9 @@ class EncoderLayer(nn.Module):
         self.dim_model = dim_model
 
     def forward(self, src_embed, src_mask):
-        # src_mask shape: batch_size, 1, seq_len
+        # src_embed shape: batch_size, seq_len, dim_model
+        # src_mask shape: batch_size, seq_len, seq_len
+
         def self_attn_layer(x):
             return self.self_attn(x, x, x, src_mask)
 
@@ -173,8 +182,12 @@ class DecoderLayer(nn.Module):
         self.sublayer = clones(SublayerConnection(size), 3)
 
     def forward(self, x, memory, src_mask, tgt_mask):
+        # x shape: batch_size, seq_len, dim_model
+        # x is usually target embedding or the output of previous decoder layer
         # memory shape: batch_size, seq_len, dim_model
-        # tgt_mask shape: batch_size, seq_len-1, seq_len-1
+        # memory is usually the output of the last encoder layer
+        # src_mask shape: batch_size, seq_len, seq_len
+        # tgt_mask shape: batch_size, seq_len, seq_len
         m = memory
 
         def self_attn_layer_tgt(x):
@@ -185,6 +198,7 @@ class DecoderLayer(nn.Module):
 
         x = self.sublayer[0](x, self_attn_layer_tgt)
         x = self.sublayer[1](x, self_attn_layer_src)
+        # return shape: batch_size, seq_len, dim_model
         return self.sublayer[2](x, self.feed_forward)
 
 
@@ -203,7 +217,7 @@ class MultiHeadedAttention(nn.Module):
         "Implements Figure 2"
         if mask is not None:
             # Same mask applied to all num_heads heads.
-            # mask shape: batch_size, 1, 1, seq_len
+            # mask shape: batch_size, 1, seq_len, seq_len
             mask = mask.unsqueeze(1)
         nbatches = query.size(0)
 
@@ -211,7 +225,7 @@ class MultiHeadedAttention(nn.Module):
         # self.linear[0, 1, 2] is query weight matrix, key weight matrix, and value weight matrix, respectively
         # l(x) represents the transformed query matrix, key matrix and value matrix
         # l(x) has shape batch_size, seq_len, dim_model. You can think l(x) as the matrices from a one-head attention
-        # or after view() and transform(), it has shape batch_size, num_heads, seq_len, d_k, so that you
+        # or after view() and transpose(), it has shape batch_size, num_heads, seq_len, d_k, so that you
         # can think l(x) as the matrices of num_heads attentions, each attention has d_k dimension.
         query, key, value = [
             l(x).view(nbatches, -1, self.num_heads, self.d_k).transpose(1, 2)
@@ -349,28 +363,30 @@ class Batch:
 
     def __init__(self, src, trg=None, pad=0):
         # src shape: batch_size, seq_len
-        # tgt shape: batch_size, seq_len
-        # src_mask shape: batch_size, 1, seq_len
+        # tgt shape: batch_size, seq_len + 1
+        # src_mask shape: batch_size, seq_len, seq_len
+        batch_size, seq_len = src.shape
         self.src = src
-        self.src_mask = (src != pad).unsqueeze(-2)
+        self.src_mask = (src != pad).repeat(1, seq_len).view(batch_size, seq_len, seq_len)
         if trg is not None:
-            # trg shape: batch_size, seq_len - 1
+            # trg shape: batch_size, seq_len
             self.trg = trg[:, :-1]
-            # trg_y shape: batch_size, seq_len - 1
+            # trg_y shape: batch_size, seq_len
             self.trg_y = trg[:, 1:]
-            # trg_mask shape: batch_size, seq_len-1, input-dim-1
+            # trg_mask shape: batch_size, seq_len, seq_len
             self.trg_mask = self.make_std_mask(self.trg, pad)
-            # ntoken shape: batch_size * (seq_len - 1)
+            # ntoken shape: batch_size * seq_len
             self.ntokens = (self.trg_y != pad).data.sum()
 
     @staticmethod
     def make_std_mask(tgt, pad):
         "Create a mask to hide padding and future words."
-        # tgt shape: batch_size, seq_len-1
-        # tgt_mask shape: batch_size, 1, seq_len-1
+        # tgt shape: batch_size, seq_len
+        # tgt_mask shape: batch_size, 1, seq_len
         tgt_mask = (tgt != pad).unsqueeze(-2)
+        # subseq_mask shape: 1, seq_len, seq_len
         subseq_mask = subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data)
-        # tgt_mask shape: batch_size, seq_len-1, seq_len-1
+        # tgt_mask shape: batch_size, seq_len, seq_len
         tgt_mask = tgt_mask & Variable(subseq_mask)
         return tgt_mask
 
@@ -416,6 +432,8 @@ def data_gen(vocab_size, batch_size, num_batches, seq_len, start_symbol):
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
         data[:, 0] = start_symbol
+        # src shape: batch_size x seq_len
+        # tgt shape: batch_size x (seq_len + 1)
         src = Variable(data[:, 1:], requires_grad=False)
         tgt = Variable(data, requires_grad=False)
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
@@ -493,13 +511,13 @@ PADDING_SYMBOL = 0
 START_SYMBOL = 1
 VOCAB_SIZE = 10 + 1 + 1
 SEQ_LEN = 7
-EPOCH_NUM = 5
+EPOCH_NUM = 1
 DIM_MODEL = 512
 DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
-BATCH_SIZE = 30
-NUM_TRAIN_BATCHES = 50
+BATCH_SIZE = 128
+NUM_TRAIN_BATCHES = 200
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=0, smoothing=0.0)
