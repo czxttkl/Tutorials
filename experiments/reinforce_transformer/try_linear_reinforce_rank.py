@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from transformer_classes import (
+from reinforce_transformer_classes import (
     clones,
     subsequent_mask,
     Embeddings,
@@ -85,10 +85,12 @@ def run_epoch(epoch, data_iter, model, loss_compute):
     return total_loss / total_tokens
 
 
-def data_gen(vocab_size, batch_size, num_batches, seq_len, start_symbol):
+def data_gen(vocab_size, vocab_dim, batch_size, num_batches, seq_len, start_symbol):
     """
     Generate random data for a src-tgt copy task.
     """
+    vocab_features = torch.randn(vocab_size, vocab_dim)
+
     for _ in range(num_batches):
         data = torch.zeros(batch_size, seq_len + 1)
         for i in range(batch_size):
@@ -115,6 +117,7 @@ def data_gen(vocab_size, batch_size, num_batches, seq_len, start_symbol):
 PADDING_SYMBOL = 0
 START_SYMBOL = 1
 VOCAB_SIZE = 10 + 1 + 1
+VOCAB_DIM = 16
 SEQ_LEN = 7
 EPOCH_NUM = 1
 DIM_MODEL = 512
@@ -125,7 +128,7 @@ BATCH_SIZE = 128
 NUM_TRAIN_BATCHES = 150
 NUM_EVAL_BATCHES = 5
 
-criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=0, smoothing=0.0)
+criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL, starting_idx=START_SYMBOL, smoothing=0.0)
 model = make_model(
     src_vocab_size=VOCAB_SIZE,
     tgt_vocab_size=VOCAB_SIZE,
@@ -148,6 +151,7 @@ for epoch in range(EPOCH_NUM):
         epoch,
         data_gen(
             vocab_size=VOCAB_SIZE,
+            vocab_dim=VOCAB_DIM,
             batch_size=BATCH_SIZE,
             num_batches=NUM_TRAIN_BATCHES,
             seq_len=SEQ_LEN,
