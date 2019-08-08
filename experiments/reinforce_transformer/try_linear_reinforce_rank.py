@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 from reinforce_transformer_classes import (
     clones,
     subsequent_mask,
@@ -103,8 +102,8 @@ def data_gen(vocab_size, vocab_dim, batch_size, num_batches, seq_len, start_symb
         data = data.long()
         # src shape: batch_size x seq_len
         # tgt shape: batch_size x (seq_len + 1)
-        src = Variable(data[:, 1:], requires_grad=False)
-        tgt = Variable(data, requires_grad=False)
+        src = data[:, 1:]
+        tgt = data
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
         # trg is used to generate target masks and embeddings, trg_y is used as labels
@@ -167,6 +166,7 @@ for epoch in range(EPOCH_NUM):
             epoch,
             data_gen(
                 vocab_size=VOCAB_SIZE,
+                vocab_dim=VOCAB_DIM,
                 batch_size=BATCH_SIZE,
                 num_batches=NUM_EVAL_BATCHES,
                 seq_len=SEQ_LEN,
@@ -185,10 +185,10 @@ def greedy_decode(model, src, src_mask, max_len):
         out = model.decode(
             memory=memory,
             src_mask=src_mask,
-            tgt=Variable(ys),
-            tgt_mask=Variable(subsequent_mask(ys.size(1)).type_as(src.data)),
+            tgt=ys,
+            tgt_mask=subsequent_mask(ys.size(1)).type_as(src.data),
         )
-        prob = model.generator.greedy_decode(out[:, -1, :], Variable(ys))
+        prob = model.generator.greedy_decode(out[:, -1, :], ys)
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.data[0]
         ys = torch.cat([ys, torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
@@ -196,8 +196,8 @@ def greedy_decode(model, src, src_mask, max_len):
 
 
 model.eval()
-src = Variable(torch.LongTensor([[3, 2, 4, 5, 6, 7, 8]]))
-src_mask = Variable(torch.ones(1, 1, SEQ_LEN))
+src = torch.LongTensor([[3, 2, 4, 5, 6, 7, 8]])
+src_mask = torch.ones(1, 1, SEQ_LEN)
 output_tgt = greedy_decode(model, src, src_mask, max_len=SEQ_LEN)
 print(f"input seq: {src}")
 print(f"output seq: {output_tgt}")
