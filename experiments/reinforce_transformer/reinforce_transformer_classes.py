@@ -66,11 +66,11 @@ class EncoderDecoder(nn.Module):
         self.tgt_embed = tgt_embed
         self.generator = generator
 
-    def forward(self, src, tgt, src_mask, tgt_mask):
+    def forward(self, src_idx, tgt_idx, src_embed, tgt_embed, src_mask, tgt_mask):
         "Take in and process masked src and target sequences."
         # encode_output shape: batch_size, seq_len, dim_model
-        encode_output = self.encode(src, src_mask)
-        decode_output = self.decode(encode_output, src_mask, tgt, tgt_mask)
+        encode_output = self.encode(src_idx, src_mask)
+        decode_output = self.decode(encode_output, src_mask, tgt_idx, tgt_mask)
         return decode_output
 
     def encode(self, src, src_mask):
@@ -350,22 +350,22 @@ class NoamOpt:
 class Batch:
     "Object for holding a batch of data with mask during training."
 
-    def __init__(self, src, trg=None, pad=0):
-        # src shape: batch_size, seq_len
-        # tgt shape: batch_size, seq_len + 1
+    def __init__(self, src_idx, trg_idx, pad_symbol):
+        # src_idx shape: batch_size, seq_len
+        # tgt_idx shape: batch_size, seq_len + 1
         # src_mask shape: batch_size, seq_len, seq_len
-        batch_size, seq_len = src.shape
-        self.src = src
-        self.src_mask = (src != pad).repeat(1, seq_len).view(batch_size, seq_len, seq_len)
-        if trg is not None:
-            # trg shape: batch_size, seq_len
-            self.trg = trg[:, :-1]
-            # trg_y shape: batch_size, seq_len
-            self.trg_y = trg[:, 1:]
-            # trg_mask shape: batch_size, seq_len, seq_len
-            self.trg_mask = self.make_std_mask(self.trg, pad)
-            # ntoken shape: batch_size * seq_len
-            self.ntokens = (self.trg_y != pad).data.sum()
+        batch_size, seq_len = src_idx.shape
+        self.src_idx = src_idx
+        self.src_mask = (src_idx != pad_symbol).repeat(1, seq_len).view(batch_size, seq_len, seq_len)
+
+        # decoder_input_idx shape: batch_size, seq_len
+        self.decoder_input_idx = trg_idx[:, :-1]
+        # target_label_idx shape: batch_size, seq_len
+        self.target_label_idx = trg_idx[:, 1:]
+        # trg_mask shape: batch_size, seq_len, seq_len
+        self.trg_mask = self.make_std_mask(self.decoder_input_idx, pad_symbol)
+        # ntoken shape: batch_size * seq_len
+        self.ntokens = (self.target_label_idx != pad_symbol).data.sum()
 
     @staticmethod
     def make_std_mask(tgt, pad):
@@ -376,7 +376,7 @@ class Batch:
         # subseq_mask shape: 1, seq_len, seq_len
         subseq_mask = subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data)
         # tgt_mask shape: batch_size, seq_len, seq_len
-        tgt_mask = tgt_mask & Variable(subseq_mask)
+        tgt_mask = tgt_mask & subseq_mask
         return tgt_mask
 
 

@@ -62,9 +62,9 @@ def run_epoch(epoch, data_iter, model, loss_compute):
     total_loss = 0
     tokens = 0
     for i, batch in enumerate(data_iter):
-        out = model.forward(batch.src, batch.trg, batch.src_mask, batch.trg_mask)
+        out = model.forward(batch.src_idx, batch.decoder_input_idx, None, None, batch.src_mask, batch.trg_mask)
         # out shape: batch_size, seq_len-1, dim_model
-        loss = loss_compute(out, batch.trg, batch.trg_y, batch.ntokens)
+        loss = loss_compute(out, batch.decoder_input_idx, batch.target_label_idx, batch.ntokens)
         total_loss += loss.detach().numpy()
         total_tokens += batch.ntokens.numpy()
         tokens += batch.ntokens.numpy()
@@ -84,30 +84,29 @@ def run_epoch(epoch, data_iter, model, loss_compute):
     return total_loss / total_tokens
 
 
-def data_gen(vocab_size, vocab_dim, batch_size, num_batches, seq_len, start_symbol):
+def data_gen(vocab_size, vocab_dim, vocab_embed, batch_size, num_batches, seq_len, start_symbol, padding_symbol):
     """
     Generate random data for a src-tgt copy task.
     """
-    vocab_features = torch.randn(vocab_size, vocab_dim)
-
     for _ in range(num_batches):
-        data = torch.zeros(batch_size, seq_len + 1)
+        indices = torch.zeros(batch_size, seq_len + 1)
         for i in range(batch_size):
-            # symbol 0 is used for padding and symbol 1 is used for starting symbol. So we generate symbols between [2, vocab_size)
-            data[i] = (torch.randperm(vocab_size-2)+2)[:seq_len+1]
+            # symbol 0 is used for padding and symbol 1 is used for starting symbol.
+            # So we generate symbols between [2, vocab_size)
+            indices[i] = (torch.randperm(vocab_size-2)+2)[:seq_len+1]
 
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
-        data[:, 0] = start_symbol
-        data = data.long()
+        indices[:, 0] = start_symbol
+        indices = indices.long()
         # src shape: batch_size x seq_len
         # tgt shape: batch_size x (seq_len + 1)
-        src = data[:, 1:]
-        tgt = data
+        src_idx = indices[:, 1:]
+        tgt_idx = indices
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
         # trg is used to generate target masks and embeddings, trg_y is used as labels
-        yield Batch(src, tgt, pad=0)
+        yield Batch(src_idx=src_idx, trg_idx=tgt_idx, pad_symbol=padding_symbol)
 
 
 
@@ -143,6 +142,7 @@ model = make_model(
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
 model_opt = torch.optim.Adam(model.parameters())
+vocab_features = torch.randn(VOCAB_SIZE, VOCAB_DIM)
 
 for epoch in range(EPOCH_NUM):
     model.train()
@@ -151,10 +151,12 @@ for epoch in range(EPOCH_NUM):
         data_gen(
             vocab_size=VOCAB_SIZE,
             vocab_dim=VOCAB_DIM,
+            vocab_embed=vocab_features,
             batch_size=BATCH_SIZE,
             num_batches=NUM_TRAIN_BATCHES,
             seq_len=SEQ_LEN,
             start_symbol=START_SYMBOL,
+            padding_symbol=PADDING_SYMBOL,
         ),
         model,
         SimpleLossCompute(model.generator, criterion, model_opt),
@@ -167,10 +169,12 @@ for epoch in range(EPOCH_NUM):
             data_gen(
                 vocab_size=VOCAB_SIZE,
                 vocab_dim=VOCAB_DIM,
+                vocab_embed=vocab_features,
                 batch_size=BATCH_SIZE,
                 num_batches=NUM_EVAL_BATCHES,
                 seq_len=SEQ_LEN,
                 start_symbol=START_SYMBOL,
+                padding_symbol=PADDING_SYMBOL,
             ),
             model,
             SimpleLossCompute(model.generator, criterion, None),
