@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from reinforce_transformer_classes import (
     clones,
     subsequent_mask,
-    Embeddings,
+    VocabEmbedder,
     PositionalEncoding,
     PositionwiseFeedForward,
     MultiHeadedAttention,
@@ -26,9 +26,10 @@ from reinforce_transformer_classes import (
 
 
 def make_model(
-    src_vocab_size,
-    tgt_vocab_size,
+    vocab_size,
+    max_seq_len,
     num_stacked_layers=6,
+    vocab_dim=16,
     dim_model=512,
     dim_feedforward=512,
     num_heads=8,
@@ -37,14 +38,12 @@ def make_model(
     c = copy.deepcopy
     attn = MultiHeadedAttention(num_heads, dim_model)
     ff = PositionwiseFeedForward(dim_model, dim_feedforward)
-    position = PositionalEncoding(dim_model)
-    embedding = nn.Sequential(Embeddings(dim_model, src_vocab_size), c(position))
+    position = PositionalEncoding(dim_model, max_len=max_seq_len)
     model = EncoderDecoder(
-        Encoder(EncoderLayer(dim_model, c(attn), c(ff)), num_stacked_layers),
-        Decoder(DecoderLayer(dim_model, c(attn), c(attn), c(ff)), num_stacked_layers),
-        src_embed=embedding,
-        tgt_embed=embedding,
-        generator=Generator(dim_model, tgt_vocab_size),
+        encoder=Encoder(EncoderLayer(dim_model, c(attn), c(ff)), num_stacked_layers),
+        decoder=Decoder(DecoderLayer(dim_model, c(attn), c(attn), c(ff)), num_stacked_layers),
+        vocab_embedder=VocabEmbedder(vocab_dim, dim_model, position),
+        generator=Generator(dim_model, vocab_size),
     )
 
     # This was important from their code.
@@ -62,8 +61,15 @@ def run_epoch(epoch, data_iter, model, loss_compute):
     total_loss = 0
     tokens = 0
     for i, batch in enumerate(data_iter):
-        out = model.forward(batch.src_idx, batch.decoder_input_idx, None, None, batch.src_mask, batch.trg_mask)
-        # out shape: batch_size, seq_len-1, dim_model
+        out = model.forward(
+            batch.src_idx,
+            batch.decoder_input_idx,
+            batch.src_embed,
+            batch.decoder_input_embed,
+            batch.src_mask,
+            batch.trg_mask
+        )
+        # out shape: batch_size, seq_len, dim_model
         loss = loss_compute(out, batch.decoder_input_idx, batch.target_label_idx, batch.ntokens)
         total_loss += loss.detach().numpy()
         total_tokens += batch.ntokens.numpy()
@@ -106,7 +112,18 @@ def data_gen(vocab_size, vocab_dim, vocab_embed, batch_size, num_batches, seq_le
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
         # trg is used to generate target masks and embeddings, trg_y is used as labels
-        yield Batch(src_idx=src_idx, trg_idx=tgt_idx, pad_symbol=padding_symbol)
+
+        # src_embed shape: batch_size x seq_len x vocab_dim
+        # tgt_embed shape: batch_size x (seq_len + 1) x vocab_dim
+        src_embed = F.embedding(src_idx, vocab_embed)
+        tgt_embed = F.embedding(tgt_idx, vocab_embed)
+        yield Batch(
+            src_idx=src_idx,
+            trg_idx=tgt_idx,
+            src_embed=src_embed,
+            tgt_embed=tgt_embed,
+            padding_symbol=padding_symbol
+        )
 
 
 
@@ -123,13 +140,14 @@ DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 150
+NUM_TRAIN_BATCHES = 200
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL, starting_idx=START_SYMBOL, smoothing=0.0)
 model = make_model(
-    src_vocab_size=VOCAB_SIZE,
-    tgt_vocab_size=VOCAB_SIZE,
+    vocab_size=VOCAB_SIZE,
+    vocab_dim=VOCAB_DIM,
+    max_seq_len=SEQ_LEN,
     num_stacked_layers=NUM_STACKED_LAYERS,
     dim_model=DIM_MODEL,
     dim_feedforward=DIM_FEEDFORWARD,
@@ -182,26 +200,28 @@ for epoch in range(EPOCH_NUM):
     )
 
 
-def greedy_decode(model, src, src_mask, max_len):
-    memory = model.encode(src, src_mask)
-    ys = torch.ones(1, 1).fill_(START_SYMBOL).type_as(src.data)
+def greedy_decode(model, vocab_embed, src_idx, src_embed, src_mask, max_len):
+    memory = model.encode(src_idx, src_embed, src_mask)
+    decoder_input_idx = torch.ones(1, 1).fill_(START_SYMBOL).type_as(src_idx.data)
     for _ in range(max_len):
         out = model.decode(
             memory=memory,
             src_mask=src_mask,
-            tgt=ys,
-            tgt_mask=subsequent_mask(ys.size(1)).type_as(src.data),
+            decoder_input_idx=decoder_input_idx,
+            decoder_input_embed=F.embedding(decoder_input_idx, vocab_embed),
+            decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type_as(src_idx.data),
         )
-        prob = model.generator.greedy_decode(out[:, -1, :], ys)
+        prob = model.generator.greedy_decode(out[:, -1, :], decoder_input_idx)
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.data[0]
-        ys = torch.cat([ys, torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
-    return ys
+        decoder_input_idx = torch.cat([decoder_input_idx, torch.ones(1, 1).type_as(src_idx.data).fill_(next_word)], dim=1)
+    return decoder_input_idx
 
 
 model.eval()
-src = torch.LongTensor([[3, 2, 4, 5, 6, 7, 8]])
+src_idx = torch.LongTensor([[3, 2, 4, 5, 6, 7, 8]])
+src_embed = F.embedding(src_idx, vocab_features)
 src_mask = torch.ones(1, 1, SEQ_LEN)
-output_tgt = greedy_decode(model, src, src_mask, max_len=SEQ_LEN)
-print(f"input seq: {src}")
+output_tgt = greedy_decode(model, vocab_features, src_idx, src_embed, src_mask, max_len=SEQ_LEN)
+print(f"input seq: {src_idx}")
 print(f"output seq: {output_tgt}")
