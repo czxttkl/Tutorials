@@ -119,17 +119,19 @@ class Generator(nn.Module):
         self.dim_model = dim_model
         self.proj = nn.Linear(dim_model, vocab_size)
 
-    def forward(self, x, y_decoder):
+    def forward(self, x, decoder_input_idx):
         # generator receives the attention x from the decoder. Shape: batch_size, seq_len, dim_model
-        # y_decoder: input to the decoder, the first symbol is always the starting symbol
+        # decoder_input_idx: input to the decoder, the first symbol is always the starting symbol
         # Shape: batch_size, seq_len
+
+        # logits: the probability distribution of each symbol
+        # batch_size, seq_len, vocab_size
         logits = self.proj(x)
         # the first two symbols are reserved for padding and decoder-starting symbols
         # so they should never be a possible output label
         logits[:, :, :2] = float("-inf")
-        batch_size, seq_len = y_decoder.shape
-        # mask_indices = torch.tril(y_label.repeat(1, seq_len).reshape(batch_size, seq_len, seq_len), diagonal=-1)
-        mask_indices = torch.tril(y_decoder.repeat(1, seq_len).reshape(batch_size, seq_len, seq_len), diagonal=0)
+        batch_size, seq_len = decoder_input_idx.shape
+        mask_indices = torch.tril(decoder_input_idx.repeat(1, seq_len).reshape(batch_size, seq_len, seq_len), diagonal=0)
         logits.scatter_(2, mask_indices, float("-inf"))
         return F.log_softmax(logits, dim=-1)
 
@@ -421,12 +423,19 @@ class SimpleLossCompute:
         self.criterion = criterion
         self.opt = opt
 
-    def __call__(self, x, y_decoder, y_label, norm):
+    def __call__(self, x, decoder_input_idx, y_label, norm):
         # x: the attention x from the decoder. Shape: batch_size, seq_len, dim_model
-        # y_decoder: input to the decoder, the first symbol is always the starting symbol
-        x = self.generator(x, y_decoder)
+        # decoder_input_idx: input to the decoder, the first symbol is always the starting symbol
+        # y_label shape: batch_size, seq_len
+
+        # log probs: log probability distribution of each symbol
+        # shape: batch_size, seq_len, vocab_size
+        log_probs = self.generator(x, decoder_input_idx)
         loss = (
-            self.criterion(x.contiguous().view(-1, x.size(-1)), y_label.contiguous().view(-1))
+            self.criterion(
+                log_probs.contiguous().view(-1, log_probs.size(-1)),
+                y_label.contiguous().view(-1)
+            )
             / norm
         )
         loss.backward()
@@ -463,4 +472,4 @@ class LabelSmoothing(nn.Module):
         if mask.dim() > 0:
             true_dist.index_fill_(0, mask.squeeze(), 0.0)
         self.true_dist = true_dist
-        return self.criterion(x, Variable(true_dist, requires_grad=False))
+        return self.criterion(x, true_dist)

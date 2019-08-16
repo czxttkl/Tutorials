@@ -2,6 +2,7 @@ import copy
 import math
 import time
 
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -90,16 +91,18 @@ def run_epoch(epoch, data_iter, model, loss_compute):
     return total_loss / total_tokens
 
 
-def data_gen(vocab_size, vocab_dim, vocab_embed, batch_size, num_batches, seq_len, start_symbol, padding_symbol):
+def data_gen(vocab_size, vocab_dim, vocab_embed, batch_size, num_batches, max_seq_len, start_symbol, padding_symbol):
     """
     Generate random data for a src-tgt copy task.
     """
     for _ in range(num_batches):
-        indices = torch.zeros(batch_size, seq_len + 1)
+        indices = torch.zeros(batch_size, max_seq_len + 1).fill_(padding_symbol)
         for i in range(batch_size):
+            random_seq_len = (i % max_seq_len) + 1
+            # random_seq_len = 7
             # symbol 0 is used for padding and symbol 1 is used for starting symbol.
             # So we generate symbols between [2, vocab_size)
-            indices[i] = (torch.randperm(vocab_size-2)+2)[:seq_len+1]
+            indices[i, 1:random_seq_len+1] = (torch.randperm(vocab_size-2)+2)[:random_seq_len]
 
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
@@ -133,21 +136,21 @@ PADDING_SYMBOL = 0
 START_SYMBOL = 1
 VOCAB_SIZE = 10 + 1 + 1
 VOCAB_DIM = 16
-SEQ_LEN = 7
+MAX_SEQ_LEN = 7
 EPOCH_NUM = 1
 DIM_MODEL = 512
 DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 200
+NUM_TRAIN_BATCHES = 220
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL, starting_idx=START_SYMBOL, smoothing=0.0)
 model = make_model(
     vocab_size=VOCAB_SIZE,
     vocab_dim=VOCAB_DIM,
-    max_seq_len=SEQ_LEN,
+    max_seq_len=MAX_SEQ_LEN,
     num_stacked_layers=NUM_STACKED_LAYERS,
     dim_model=DIM_MODEL,
     dim_feedforward=DIM_FEEDFORWARD,
@@ -172,7 +175,7 @@ for epoch in range(EPOCH_NUM):
             vocab_embed=vocab_features,
             batch_size=BATCH_SIZE,
             num_batches=NUM_TRAIN_BATCHES,
-            seq_len=SEQ_LEN,
+            max_seq_len=MAX_SEQ_LEN,
             start_symbol=START_SYMBOL,
             padding_symbol=PADDING_SYMBOL,
         ),
@@ -190,7 +193,7 @@ for epoch in range(EPOCH_NUM):
                 vocab_embed=vocab_features,
                 batch_size=BATCH_SIZE,
                 num_batches=NUM_EVAL_BATCHES,
-                seq_len=SEQ_LEN,
+                max_seq_len=MAX_SEQ_LEN,
                 start_symbol=START_SYMBOL,
                 padding_symbol=PADDING_SYMBOL,
             ),
@@ -200,10 +203,10 @@ for epoch in range(EPOCH_NUM):
     )
 
 
-def greedy_decode(model, vocab_embed, src_idx, src_embed, src_mask, max_len):
+def greedy_decode(model, vocab_embed, src_idx, src_embed, src_mask, max_seq_len):
     memory = model.encode(src_idx, src_embed, src_mask)
     decoder_input_idx = torch.ones(1, 1).fill_(START_SYMBOL).type_as(src_idx.data)
-    for _ in range(max_len):
+    for _ in range(max_seq_len):
         out = model.decode(
             memory=memory,
             src_mask=src_mask,
@@ -221,7 +224,7 @@ def greedy_decode(model, vocab_embed, src_idx, src_embed, src_mask, max_len):
 model.eval()
 src_idx = torch.LongTensor([[3, 2, 4, 5, 6, 7, 8]])
 src_embed = F.embedding(src_idx, vocab_features)
-src_mask = torch.ones(1, 1, SEQ_LEN)
-output_tgt = greedy_decode(model, vocab_features, src_idx, src_embed, src_mask, max_len=SEQ_LEN)
+src_mask = torch.ones(1, 1, MAX_SEQ_LEN)
+output_tgt = greedy_decode(model, vocab_features, src_idx, src_embed, src_mask, max_seq_len=MAX_SEQ_LEN)
 print(f"input seq: {src_idx}")
 print(f"output seq: {output_tgt}")
