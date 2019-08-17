@@ -9,12 +9,21 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 
-
 def subsequent_mask(size):
     "Mask out subsequent positions."
     attn_shape = (1, size, size)
     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype("uint8")
     return torch.from_numpy(subsequent_mask) == 0
+
+
+def aug_user_features_mask(src_vocab_mask):
+    # src_vocab_mask shape: batch_size, seq_len, seq_len
+    batch_size, seq_len, _ = src_vocab_mask.shape
+    src_mask = torch.ones(batch_size, seq_len + 1, seq_len + 1).byte()
+    src_mask[:, :-1, 1:] = src_vocab_mask
+    src_mask[:, -1, :] = src_mask[:, -2, :]
+    # src_mask shape: batch_size, seq_len + 1, seq_len + 1
+    return src_mask
 
 
 def clones(module, N):
@@ -58,42 +67,61 @@ class EncoderDecoder(nn.Module):
     other models.
     """
 
-    def __init__(self, encoder, decoder, vocab_embedder, generator):
+    def __init__(self, encoder, decoder, user_vocab_embedder, generator):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.vocab_embedder = vocab_embedder
+        self.user_vocab_embedder = user_vocab_embedder
         self.generator = generator
 
-    def forward(self, src_idx, decoder_input_idx, src_embed, decoder_input_embed, src_mask, decoder_input_mask):
+    def forward(
+        self,
+        user_features,
+        src_vocab_idx,
+        decoder_input_idx,
+        src_vocab_embed,
+        decoder_input_embed,
+        src_vocab_mask,
+        decoder_input_mask,
+    ):
         "Take in and process masked src and target sequences."
-        # encode_output shape: batch_size, seq_len, dim_model
-        encode_output = self.encode(src_idx, src_embed, src_mask)
+        # add 1 to allow attention on user features, which are always placed at
+        # the beginning of each sequence
+        src_mask = aug_user_features_mask(src_vocab_mask)
+
+        # encoder_output shape: batch_size, seq_len, dim_model
+        encoder_output = self.encode(user_features, src_vocab_idx, src_vocab_embed, src_mask)
+        # tgt_src_mask shape: batch_size, seq_len, seq_len + 1
+        tgt_src_mask = src_mask[:, :-1, :]
         decode_output = self.decode(
-            encode_output, src_mask, decoder_input_idx, decoder_input_embed, decoder_input_mask
+            encoder_output, tgt_src_mask, decoder_input_idx, decoder_input_embed, decoder_input_mask
         )
         return decode_output
 
-    def encode(self, src_idx, src_embed, src_mask):
-        # src_idx shape: batch_size, seq_len
-        # src_embed: batch_size, seq_len, dim_model
-        # src_mask shape: batch_size, seq_len, seq_len
-        src_embed = self.vocab_embedder(src_embed)
-        return self.encoder(src_embed, src_mask)
+    def encode(self, user_features, src_vocab_idx, src_vocab_embed, src_mask):
+        # src_vocab_idx shape: batch_size, seq_len
+        # src_vocab_embed shape: batch_size, seq_len, dim_model
+        # src_mask shape: batch_size, seq_len + 1, seq_len + 1
 
-    def decode(self, memory, src_mask, decoder_input_idx, decoder_input_embed, decoder_input_mask):
+        # input_embed shape: batch_size, seq_len+1, dim_model
+        # the first embedding of each sequence is user embedding,
+        # while the rest is item embeddings.
+        input_embed = self.user_vocab_embedder(src_vocab_embed, user_features)
+        return self.encoder(input_embed, src_mask)
+
+    def decode(self, memory, tgt_src_mask, decoder_input_idx, decoder_input_embed, decoder_input_mask):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
 
-        # src_mask shape: batch_size, seq_len, seq_len
+        # tgt_src_mask shape: batch_size, seq_len, seq_len + 1
         # tgt decoder_input_idx shape: batch_size, seq_len
         # decoder_input_embed shape: batch_size, seq_len, dim_model
         # decoder_input_mask shape: batch_size, seq_len, seq_len
 
-        decoder_input_embed = self.vocab_embedder(decoder_input_embed)
+        decoder_input_embed = self.user_vocab_embedder(decoder_input_embed)
 
         # return type: batch_size, seq_len, dim_model
-        return self.decoder(decoder_input_embed, memory, src_mask, decoder_input_mask)
+        return self.decoder(decoder_input_embed, memory, tgt_src_mask, decoder_input_mask)
 
 
 class Encoder(nn.Module):
@@ -195,10 +223,10 @@ class Decoder(nn.Module):
         self.layers = clones(layer, num_layers)
         self.norm = LayerNorm(layer.size)
 
-    def forward(self, x, memory, src_mask, tgt_mask):
+    def forward(self, x, memory, tgt_src_mask, tgt_mask):
         # each layer is one DecoderLayer
         for layer in self.layers:
-            x = layer(x, memory, src_mask, tgt_mask)
+            x = layer(x, memory, tgt_src_mask, tgt_mask)
         return self.norm(x)
 
 
@@ -213,12 +241,12 @@ class DecoderLayer(nn.Module):
         self.feed_forward = feed_forward
         self.sublayer = clones(SublayerConnection(size), 3)
 
-    def forward(self, x, memory, src_mask, tgt_mask):
+    def forward(self, x, memory, tgt_src_mask, tgt_mask):
         # x shape: batch_size, seq_len, dim_model
         # x is usually target embedding or the output of previous decoder layer
         # memory shape: batch_size, seq_len, dim_model
         # memory is usually the output of the last encoder layer
-        # src_mask shape: batch_size, seq_len, seq_len
+        # tgt_src_mask shape: batch_size, seq_len, seq_len + 1
         # tgt_mask shape: batch_size, seq_len, seq_len
         m = memory
 
@@ -226,7 +254,7 @@ class DecoderLayer(nn.Module):
             return self.self_attn(query=x, key=x, value=x, mask=tgt_mask)
 
         def self_attn_layer_src(x):
-            return self.self_attn(query=x, key=m, value=m, mask=src_mask)
+            return self.self_attn(query=x, key=m, value=m, mask=tgt_src_mask)
 
         x = self.sublayer[0](x, self_attn_layer_tgt)
         x = self.sublayer[1](x, self_attn_layer_src)
@@ -287,20 +315,34 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(F.relu(self.w_1(x)))
 
 
-class VocabEmbedder(nn.Module):
-    def __init__(self, dim_vocab, dim_model, positional_encoding=None):
-        super(VocabEmbedder, self).__init__()
-        self.linear = nn.Linear(dim_vocab, dim_model)
+class UserVocabEmbedder(nn.Module):
+    def __init__(self, dim_user, dim_vocab, dim_model, positional_encoding=None):
+        super(UserVocabEmbedder, self).__init__()
+        self.vocab_linear = nn.Linear(dim_vocab, dim_model)
+        self.user_linear = nn.Linear(dim_user, dim_model)
         self.positional_encoding = positional_encoding
         self.dim_model = dim_model
         self.dim_vocab = dim_vocab
+        self.dim_user = dim_user
 
-    def forward(self, x):
-        # x: raw input features. Shape: batch_size, seq_len, dim_vocab
-        output = self.linear(x) * math.sqrt(self.dim_model)
+    def forward(self, vocab_features, user_features=None):
+        # vocab_features: raw item features. Shape: batch_size, seq_len, dim_vocab
+        # user_features: raw user features. Shape: batch_size, dim_user
+
+        # vocab_embed shape: batch_size, seq_len, dim_model
+        vocab_embed = self.vocab_linear(vocab_features)
+
+        if user_features is not None:
+            # user_embed shape: batch_size, 1, dim_model
+            user_embed = self.user_linear(user_features).unsqueeze(1)
+            output = torch.cat((user_embed, vocab_embed), dim=1)
+        else:
+            output = vocab_embed
+        output = output * math.sqrt(self.dim_model)
         if self.positional_encoding:
             output = self.positional_encoding(output)
-        # output shape: batch_size, seq_len, dim_model
+        # output shape: batch_size, seq_len + 1, dim_model if user_features is not None
+        # else, output shape: batch_size, seq_len, dim_model
         return output
 
 
@@ -362,15 +404,20 @@ class NoamOpt:
 class Batch:
     "Object for holding a batch of data with mask during training."
 
-    def __init__(self, src_idx, trg_idx, src_embed, tgt_embed, padding_symbol):
+    def __init__(
+        self, user_features, src_idx, trg_idx, src_embed, tgt_embed, padding_symbol
+    ):
+        # user_features shape: batch_size, dim_user
         # src_idx shape: batch_size, seq_len
         # tgt_idx shape: batch_size, seq_len + 1
         # src_embed shape: batch_size, seq_len, vocab_dim
         # tgt_embed shape: batch_size, seq_len + 1, vocab_dim
         # src_mask shape: batch_size, seq_len, seq_len
+        self.user_features = user_features
 
         batch_size, seq_len = src_idx.shape
         self.src_idx = src_idx
+        # src_mask shape: batch_size, seq_len, seq_len
         self.src_mask = (src_idx != padding_symbol).repeat(1, seq_len).view(batch_size, seq_len, seq_len)
 
         # decoder_input_idx shape: batch_size, seq_len
