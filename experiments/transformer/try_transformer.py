@@ -574,7 +574,7 @@ def greedy_decode(model, src, src_mask, max_len):
     for _ in range(max_len):
         out = model.decode(
             memory=memory,
-            tgt_src_mask=src_mask,
+            src_mask=src_mask,
             tgt=Variable(ys),
             tgt_mask=Variable(subsequent_mask(ys.size(1)).type_as(src.data)),
         )

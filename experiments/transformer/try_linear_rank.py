@@ -69,14 +69,17 @@ def run_epoch(epoch, data_iter, model, loss_compute):
         total_loss += loss.detach().numpy()
         total_tokens += batch.ntokens.numpy()
         tokens += batch.ntokens.numpy()
+        avg_loss = loss.detach().numpy() / batch.ntokens.numpy()
         if i and i % 10 == 9:
             elapsed = time.time() - start
             print(
-                "Epoch %d Step: %d Loss: %f Tokens per Sec: %f"
+                "Epoch %d Step: %d Loss: %f Tokens %f Elapse: %f Tokens per Sec: %f"
                 % (
                     epoch,
                     i,
-                    loss.detach().numpy() / batch.ntokens.numpy(),
+                    avg_loss,
+                    tokens,
+                    elapsed,
                     tokens / elapsed,
                 )
             )
@@ -122,7 +125,7 @@ DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 150
+NUM_TRAIN_BATCHES = 1500
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=0, smoothing=0.0)
@@ -180,7 +183,7 @@ def greedy_decode(model, src, src_mask, max_len):
     for _ in range(max_len):
         out = model.decode(
             memory=memory,
-            tgt_src_mask=src_mask,
+            src_mask=src_mask,
             tgt=Variable(ys),
             tgt_mask=Variable(subsequent_mask(ys.size(1)).type_as(src.data)),
         )
