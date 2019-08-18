@@ -9,6 +9,8 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 
+def embedding(idx, table):
+    return torch.from_numpy(table[idx.flatten()].reshape((idx.shape[0], idx.shape[1], -1)))
 
 def subsequent_mask(size):
     "Mask out subsequent positions."
@@ -74,23 +76,24 @@ class EncoderDecoder(nn.Module):
         )
         return decode_output
 
-    def encode(self, src_idx, src_embed, src_mask):
+    def encode(self, src_idx, src_features, src_mask):
         # src_idx shape: batch_size, seq_len
-        # src_embed: batch_size, seq_len, dim_model
+        # src_features: batch_size, seq_len, dim_vocab
         # src_mask shape: batch_size, seq_len, seq_len
-        src_embed = self.vocab_embedder(src_embed)
+
+        # src_embed: batch_size, seq_len, dim_model
+        src_embed = self.vocab_embedder(src_features)
         return self.encoder(src_embed, src_mask)
 
-    def decode(self, memory, src_mask, decoder_input_idx, decoder_input_embed, decoder_input_mask):
+    def decode(self, memory, src_mask, decoder_input_idx, decoder_input_features, decoder_input_mask):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
-
         # src_mask shape: batch_size, seq_len, seq_len
-        # tgt decoder_input_idx shape: batch_size, seq_len
-        # decoder_input_embed shape: batch_size, seq_len, dim_model
+        # decoder_input_features shape: batch_size, seq_len, dim_vocab
         # decoder_input_mask shape: batch_size, seq_len, seq_len
 
-        decoder_input_embed = self.vocab_embedder(decoder_input_embed)
+        # decoder_input_embed shape: batch_size, seq_len, dim_model
+        decoder_input_embed = self.vocab_embedder(decoder_input_features)
 
         # return type: batch_size, seq_len, dim_model
         return self.decoder(decoder_input_embed, memory, src_mask, decoder_input_mask)
