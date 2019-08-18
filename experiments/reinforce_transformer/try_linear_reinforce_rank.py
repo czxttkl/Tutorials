@@ -93,8 +93,8 @@ def run_epoch(epoch, data_iter, model, loss_compute):
             )
             start = time.time()
             tokens = 0
-        # if avg_loss < 0.1:
-        #     break
+        if avg_loss < 0.01:
+            break
     return total_loss / total_tokens
 
 
@@ -105,23 +105,27 @@ def data_gen(dim_user, vocab_size, vocab_dim, vocab_embed, batch_size, num_batch
     for _ in range(num_batches):
         user_features = torch.randn(batch_size, dim_user)
 
-        indices = torch.zeros(batch_size, max_seq_len + 1).fill_(padding_symbol)
-        for i in range(batch_size):
-            random_seq_len = (i % max_seq_len) + 1
-            # random_seq_len = 7
-
-            # symbol 0 is used for padding and symbol 1 is used for starting symbol.
-            # So we generate symbols between [2, vocab_size)
-            indices[i, 1:random_seq_len+1] = (torch.randperm(vocab_size-2)+2)[:random_seq_len]
-
+        src_idx = torch.zeros(batch_size, max_seq_len).fill_(padding_symbol).long()
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
-        indices[:, 0] = start_symbol
-        indices = indices.long()
-        # src shape: batch_size x seq_len
-        # tgt shape: batch_size x (seq_len + 1)
-        src_idx = indices[:, 1:]
-        tgt_idx = indices
+        tgt_idx = torch.zeros(batch_size, max_seq_len + 1).fill_(padding_symbol).long()
+        tgt_idx[:, 0] = start_symbol
+
+        for i in range(batch_size):
+            # random_seq_len = (i % max_seq_len) + 1
+            random_seq_len = 7
+            # symbol 0 is used for padding and symbol 1 is used for starting symbol.
+            # So we generate symbols between [2, vocab_size)
+            indices = (torch.randperm(vocab_size-2)+2)[:random_seq_len]
+            src_idx[i, :random_seq_len] = indices
+            if torch.sum(user_features[i]) > 0:
+                tgt_idx[i, 1:random_seq_len+1] = indices.clone()
+            else:
+                tgt_idx[i, 1:random_seq_len+1] = torch.from_numpy(np.array(indices.numpy()[::-1]))
+
+        # src_Idx shape: batch_size x seq_len
+        # tgt_tgt shape: batch_size x (seq_len + 1)
+
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
         # trg is used to generate target masks and embeddings, trg_y is used as labels
@@ -155,7 +159,7 @@ DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 700
+NUM_TRAIN_BATCHES = 10000
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL, starting_idx=START_SYMBOL, smoothing=0.0)
@@ -175,7 +179,7 @@ model = make_model(
 #     warmup=400,
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
-model_opt = torch.optim.Adam(model.parameters())
+model_opt = torch.optim.Adam(model.parameters(), amsgrad=True)
 vocab_features = torch.randn(VOCAB_SIZE, DIM_VOCAB)
 
 for epoch in range(EPOCH_NUM):
@@ -245,6 +249,8 @@ def greedy_decode(model, user_features, vocab_features, src_vocab_idx, src_vocab
 
 model.eval()
 user_features = torch.randn(2, DIM_USER)
+user_features[0] = -0.1
+user_features[1] = 0.1
 src_vocab_idx = torch.LongTensor([
     [3, 2, 4, 5, 6, 7, 8],
     [8, 10, 9, 5, 11, PADDING_SYMBOL, PADDING_SYMBOL],
