@@ -45,6 +45,7 @@ def make_model(
         decoder=Decoder(DecoderLayer(dim_model, c(attn), c(attn), c(ff)), num_stacked_layers),
         vocab_embedder=VocabEmbedder(vocab_dim, dim_model, c(position)),
         generator=Generator(dim_model, vocab_size),
+        positional_encoding=c(position),
     )
 
     # This was important from their code.
@@ -65,8 +66,8 @@ def run_epoch(epoch, data_iter, model, loss_compute):
         out = model.forward(
             batch.src_idx,
             batch.decoder_input_idx,
-            batch.src_embed,
-            batch.decoder_input_embed,
+            batch.src_features,
+            batch.decoder_input_features,
             batch.src_mask,
             batch.trg_mask
         )
@@ -75,6 +76,7 @@ def run_epoch(epoch, data_iter, model, loss_compute):
         total_loss += loss.detach().numpy()
         total_tokens += batch.ntokens.numpy()
         tokens += batch.ntokens.numpy()
+        avg_loss = loss.detach().numpy() / batch.ntokens.numpy()
         if i and i % 10 == 9:
             elapsed = time.time() - start
             print(
@@ -82,12 +84,15 @@ def run_epoch(epoch, data_iter, model, loss_compute):
                 % (
                     epoch,
                     i,
-                    loss.detach().numpy() / batch.ntokens.numpy(),
+                    avg_loss,
                     tokens / elapsed,
                 )
             )
             start = time.time()
             tokens = 0
+        if avg_loss < 0.05:
+            break
+
     return total_loss / total_tokens
 
 
@@ -104,10 +109,10 @@ def data_gen(vocab_size, vocab_dim, vocab_features, batch_size, num_batches, max
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
         tgt_idx[:, 0] = start_symbol
 
-        # src_embed shape: batch_size x seq_len x vocab_dim
-        # tgt_embed shape: batch_size x (seq_len + 1) x vocab_dim
-        src_embed = np.zeros((batch_size, max_seq_len, vocab_dim)).astype(np.float32)
-        tgt_embed = np.zeros((batch_size, max_seq_len + 1, vocab_dim)).astype(np.float32)
+        # src_features shape: batch_size x seq_len x vocab_dim
+        # tgt_features shape: batch_size x (seq_len + 1) x vocab_dim
+        src_features = np.zeros((batch_size, max_seq_len, vocab_dim)).astype(np.float32)
+        tgt_features = np.zeros((batch_size, max_seq_len + 1, vocab_dim)).astype(np.float32)
 
         for i in range(batch_size):
             # random_seq_len = (i % max_seq_len) + 1
@@ -115,21 +120,21 @@ def data_gen(vocab_size, vocab_dim, vocab_features, batch_size, num_batches, max
             # symbol 0 is used for padding and symbol 1 is used for starting symbol.
             # So we generate symbols between [2, vocab_size)
             src_idx[i] = (np.random.permutation(vocab_size-2)+2)[:random_seq_len]
-            tgt_idx[i, 1:] = (np.argsort(np.sum(vocab_features[2:], axis=1)) + 2)[:random_seq_len]
-            src_embed[i] = embedding(src_idx[i], vocab_features)
-            tgt_embed[i] = embedding(tgt_idx[i], vocab_features)
+            # tgt_idx[i, 1:] = (np.argsort(np.sum(vocab_features[2:], axis=1)) + 2)[:random_seq_len]
+            tgt_idx[i, 1:] = np.array(src_idx[i, ::-1])
+
+            src_features[i] = embedding(src_idx[i], vocab_features)
+            tgt_features[i] = embedding(tgt_idx[i], vocab_features)
 
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
         # trg is used to generate target masks and embeddings, trg_y is used as labels
 
-
-
         yield Batch(
             src_idx=torch.from_numpy(src_idx),
             trg_idx=torch.from_numpy(tgt_idx),
-            src_embed=torch.from_numpy(src_embed),
-            tgt_embed=torch.from_numpy(tgt_embed),
+            src_features=torch.from_numpy(src_features),
+            tgt_features=torch.from_numpy(tgt_features),
             padding_symbol=padding_symbol
         )
 
@@ -144,12 +149,12 @@ DIM_USER = 20
 VOCAB_DIM = 16
 MAX_SEQ_LEN = 7
 EPOCH_NUM = 1
-DIM_MODEL = 512
+DIM_MODEL = 16
 DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 10
+NUM_TRAIN_BATCHES = 4000
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL, starting_idx=START_SYMBOL, smoothing=0.0)
