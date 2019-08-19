@@ -96,35 +96,40 @@ def data_gen(vocab_size, vocab_dim, vocab_features, batch_size, num_batches, max
     Generate random data for a src-tgt copy task.
     """
     for _ in range(num_batches):
-        indices = np.full((batch_size, max_seq_len + 1), padding_symbol).astype(np.long)
-        for i in range(batch_size):
-            # random_seq_len = (i % max_seq_len) + 1
-            random_seq_len = 7
-            # symbol 0 is used for padding and symbol 1 is used for starting symbol.
-            # So we generate symbols between [2, vocab_size)
-            indices[i, 1:random_seq_len+1] = (np.random.permutation(vocab_size-2)+2)[:random_seq_len]
-
+        # src shape: batch_size x seq_len
+        src_idx = np.full((batch_size, max_seq_len), padding_symbol).astype(np.long)
+        # tgt shape: batch_size x (seq_len + 1)
+        tgt_idx = np.full((batch_size, max_seq_len + 1), padding_symbol).astype(np.long)
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
-        indices[:, 0] = start_symbol
-        # src shape: batch_size x seq_len
-        # tgt shape: batch_size x (seq_len + 1)
-        src_idx = indices[:, 1:]
-        tgt_idx = indices
+        tgt_idx[:, 0] = start_symbol
+
+        # src_embed shape: batch_size x seq_len x vocab_dim
+        # tgt_embed shape: batch_size x (seq_len + 1) x vocab_dim
+        src_embed = np.zeros((batch_size, max_seq_len, vocab_dim)).astype(np.float32)
+        tgt_embed = np.zeros((batch_size, max_seq_len + 1, vocab_dim)).astype(np.float32)
+
+        for i in range(batch_size):
+            # random_seq_len = (i % max_seq_len) + 1
+            random_seq_len = max_seq_len
+            # symbol 0 is used for padding and symbol 1 is used for starting symbol.
+            # So we generate symbols between [2, vocab_size)
+            src_idx[i] = (np.random.permutation(vocab_size-2)+2)[:random_seq_len]
+            tgt_idx[i, 1:] = (np.argsort(np.sum(vocab_features[2:], axis=1)) + 2)[:random_seq_len]
+            src_embed[i] = embedding(src_idx[i], vocab_features)
+            tgt_embed[i] = embedding(tgt_idx[i], vocab_features)
+
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
         # trg is used to generate target masks and embeddings, trg_y is used as labels
 
-        # src_embed shape: batch_size x seq_len x vocab_dim
-        # tgt_embed shape: batch_size x (seq_len + 1) x vocab_dim
-        src_embed = embedding(src_idx, vocab_features)
-        tgt_embed = embedding(tgt_idx, vocab_features)
+
 
         yield Batch(
             src_idx=torch.from_numpy(src_idx),
             trg_idx=torch.from_numpy(tgt_idx),
-            src_embed=src_embed,
-            tgt_embed=tgt_embed,
+            src_embed=torch.from_numpy(src_embed),
+            tgt_embed=torch.from_numpy(tgt_embed),
             padding_symbol=padding_symbol
         )
 
@@ -144,7 +149,7 @@ DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 300
+NUM_TRAIN_BATCHES = 10
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL, starting_idx=START_SYMBOL, smoothing=0.0)
@@ -215,7 +220,7 @@ def greedy_decode(
             memory=memory,
             src_mask=src_mask,
             decoder_input_idx=decoder_input_idx,
-            decoder_input_features=embedding(decoder_input_idx, vocab_features),
+            decoder_input_features=torch.from_numpy(embedding(decoder_input_idx, vocab_features)),
             decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type_as(src_idx.data),
         )
         prob = model.generator.greedy_decode(out[:, -1, :], decoder_input_idx)
@@ -229,6 +234,7 @@ def greedy_decode(
 
 
 model.eval()
+print("correct order", np.argsort(np.sum(vocab_features[2:], axis=1)) + 2)
 test_batch_size = 2
 user_features = torch.randn(test_batch_size, DIM_USER)
 user_features[0] = -0.1
@@ -237,7 +243,7 @@ src_idx = torch.LongTensor([
     [3, 2, 4, 5, 6, 7, 8],
     [5, 4, 3, 2, 10, 9, 8],
 ])
-src_embed = embedding(src_idx, vocab_features)
+src_embed = torch.from_numpy(embedding(src_idx, vocab_features))
 src_mask = torch.ones(test_batch_size, 1, MAX_SEQ_LEN)
 output_tgt = greedy_decode(model, user_features, vocab_features, src_idx, src_embed, src_mask, max_seq_len=MAX_SEQ_LEN)
 print(f"input seq:\n{src_idx}")

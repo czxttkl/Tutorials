@@ -10,7 +10,8 @@ from torch.autograd import Variable
 
 
 def embedding(idx, table):
-    return torch.from_numpy(table[idx.flatten()].reshape((idx.shape[0], idx.shape[1], -1)))
+    new_shape = (*idx.shape, -1)
+    return table[idx.flatten()].reshape(new_shape)
 
 def subsequent_mask(size):
     "Mask out subsequent positions."
@@ -291,7 +292,7 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class VocabEmbedder(nn.Module):
-    def __init__(self, dim_vocab, dim_model, positional_encoding=None):
+    def __init__(self, dim_vocab, dim_model, positional_encoding):
         super(VocabEmbedder, self).__init__()
         self.linear = nn.Linear(dim_vocab, dim_model)
         self.positional_encoding = positional_encoding
@@ -301,8 +302,7 @@ class VocabEmbedder(nn.Module):
     def forward(self, x):
         # x: raw input features. Shape: batch_size, seq_len, dim_vocab
         output = self.linear(x) * math.sqrt(self.dim_model)
-        if self.positional_encoding:
-            output = self.positional_encoding(output)
+        output = self.positional_encoding(output)
         # output shape: batch_size, seq_len, dim_model
         return output
 
