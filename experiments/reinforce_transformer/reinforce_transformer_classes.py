@@ -361,6 +361,7 @@ class PositionalEncoding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
+        # pe shape: 1, max_len, dim_model
         self.register_buffer("pe", pe)
 
     def forward(self, x):
@@ -439,7 +440,7 @@ class Batch:
         subseq_mask = subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data)
         # tgt_mask shape: batch_size, seq_len, seq_len
         tgt_mask = tgt_mask & subseq_mask
-        return tgt_mask
+        return tgt_mask.type(torch.int8)
 
 
 # # Test LabelSmoothing

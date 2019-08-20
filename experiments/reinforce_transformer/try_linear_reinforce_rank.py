@@ -31,12 +31,12 @@ from reinforce_transformer_classes import (
 def make_model(
     vocab_size,
     max_seq_len,
-    num_stacked_layers=6,
-    vocab_dim=16,
-    user_dim=20,
-    dim_model=512,
-    dim_feedforward=512,
-    num_heads=8,
+    num_stacked_layers,
+    vocab_dim,
+    user_dim,
+    dim_model,
+    dim_feedforward,
+    num_heads,
 ):
     "Helper: Construct a model from hyperparameters."
     c = copy.deepcopy
@@ -82,14 +82,16 @@ def run_epoch(epoch, data_iter, model, loss_compute):
         avg_loss = loss.detach().numpy() / batch.ntokens.numpy()
         if i and i % 10 == 9:
             elapsed = time.time() - start
+            total_elapsed = time.time() - total_start_time
             print(
-                "Epoch %d Step: %d Loss: %f Tokens per Sec: %f Elapse: %f"
+                "Epoch %d Step: %d Loss: %f Tokens per Sec: %d Elapse: %.3f, %.3f"
                 % (
                     epoch,
                     i,
                     avg_loss,
                     tokens / elapsed,
                     elapsed,
+                    total_elapsed,
                 )
             )
             start = time.time()
@@ -135,8 +137,9 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
             src_idx[i, random_seq_len:] = padding_symbol
             src_mask[i] = (src_idx[i] != padding_symbol).repeat(max_seq_len).reshape((max_seq_len, max_seq_len))
 
-            # tgt_idx[i, 1:] = (np.argsort(np.sum(vocab_features[2:], axis=1)) + 2)[:random_seq_len]
-            sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1)) + 2
+            # order = 1. if np.sum(user_features[i]) > 0 else -1.
+            order = 1. if np.sum(vocab_features[3]) > 0 else -1.
+            sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1) * order) + 2
             tgt_idx[i, 1:1+random_seq_len] = sort_idx
             src_features[i] = embedding(src_idx[i], vocab_features)
             tgt_features[i] = embedding(tgt_idx[i], vocab_features)
@@ -145,7 +148,7 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
         # trg is used to generate target masks and embeddings, trg_y is used as labels
 
-        # we also need to user features, which will be placed at the beginning of each sequence
+        # we also need to attend user features, which will be placed at the beginning of each sequence
         # src_mask shape: batch_size x (seq_len + 1) x (seq_len + 1)
         src_mask = aug_user_features_mask(src_mask)
 
@@ -164,9 +167,9 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
 # vocab symbol includes padding symbol (0) and sequence starting symbol (1)
 PADDING_SYMBOL = 0
 START_SYMBOL = 1
-DIM_USER = 20
+DIM_USER = 16
 VOCAB_DIM = 16
-MAX_SEQ_LEN = 7
+MAX_SEQ_LEN = 5
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 64
@@ -181,6 +184,7 @@ criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL
 model = make_model(
     vocab_size=VOCAB_SIZE,
     vocab_dim=VOCAB_DIM,
+    user_dim=DIM_USER,
     max_seq_len=MAX_SEQ_LEN,
     num_stacked_layers=NUM_STACKED_LAYERS,
     dim_model=DIM_MODEL,
