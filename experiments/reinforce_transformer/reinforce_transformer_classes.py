@@ -69,17 +69,16 @@ class EncoderDecoder(nn.Module):
         self.generator = generator
         self.positional_encoding = positional_encoding
 
-    def forward(self, src_idx, decoder_input_idx, src_features, decoder_input_features, src_mask, decoder_input_mask):
+    def forward(self, src_features, decoder_input_features, src_mask, decoder_input_mask):
         "Take in and process masked src and target sequences."
         # encode_output shape: batch_size, seq_len, dim_model
-        encode_output = self.encode(src_idx, src_features, src_mask)
+        encode_output = self.encode(src_features, src_mask)
         decode_output = self.decode(
-            encode_output, src_mask, decoder_input_idx, decoder_input_features, decoder_input_mask
+            encode_output, src_mask, decoder_input_features, decoder_input_mask
         )
         return decode_output
 
-    def encode(self, src_idx, src_features, src_mask):
-        # src_idx shape: batch_size, seq_len
+    def encode(self, src_features, src_mask):
         # src_features: batch_size, seq_len, dim_vocab
         # src_mask shape: batch_size, seq_len, seq_len
 
@@ -87,7 +86,7 @@ class EncoderDecoder(nn.Module):
         src_embed = self.vocab_embedder(src_features)
         return self.encoder(src_embed, src_mask)
 
-    def decode(self, memory, src_mask, decoder_input_idx, decoder_input_features, decoder_input_mask):
+    def decode(self, memory, src_mask, decoder_input_features, decoder_input_mask):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
         # src_mask shape: batch_size, seq_len, seq_len
@@ -366,16 +365,14 @@ class NoamOpt:
 class Batch:
     "Object for holding a batch of data with mask during training."
 
-    def __init__(self, src_idx, trg_idx, src_features, tgt_features, padding_symbol):
-        # src_idx shape: batch_size, seq_len
+    def __init__(self, src_mask, trg_idx, src_features, tgt_features, padding_symbol):
         # tgt_idx shape: batch_size, seq_len + 1
         # src_embed shape: batch_size, seq_len, vocab_dim
         # tgt_embed shape: batch_size, seq_len + 1, vocab_dim
         # src_mask shape: batch_size, seq_len, seq_len
 
-        batch_size, seq_len = src_idx.shape
-        self.src_idx = src_idx
-        self.src_mask = (src_idx != padding_symbol).repeat(1, seq_len).view(batch_size, seq_len, seq_len)
+        batch_size, seq_len, _ = src_mask.shape
+        self.src_mask = src_mask
 
         # decoder_input_idx shape: batch_size, seq_len
         self.decoder_input_idx = trg_idx[:, :-1]
