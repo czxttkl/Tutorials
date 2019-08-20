@@ -1,7 +1,5 @@
 import copy
 import math
-import time
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,16 +10,6 @@ from torch.autograd import Variable
 def embedding(idx, table):
     new_shape = (*idx.shape, -1)
     return table[idx.flatten()].reshape(new_shape)
-
-
-def aug_user_features_mask(src_vocab_mask):
-    # src_vocab_mask shape: batch_size, seq_len, seq_len
-    batch_size, seq_len, _ = src_vocab_mask.shape
-    src_mask = np.ones((batch_size, seq_len + 1, seq_len + 1)).astype(np.int8)
-    src_mask[:, :-1, 1:] = src_vocab_mask
-    src_mask[:, -1, :] = src_mask[:, -2, :]
-    # src_mask shape: batch_size, seq_len + 1, seq_len + 1
-    return src_mask
 
 
 def subsequent_mask(size):
@@ -83,16 +71,19 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, user_features, src_features, decoder_input_features, src_mask, decoder_input_mask):
         "Take in and process masked src and target sequences."
-        tgt_seq_len = decoder_input_features.shape[1]
 
         # encoder_output shape: batch_size, seq_len + 1, dim_model
         encoder_output = self.encode(user_features, src_features, src_mask)
 
         # tgt_src_mask shape: batch_size, seq_len, seq_len + 1
+        tgt_seq_len = decoder_input_features.shape[1]
+        src_seq_len = src_features.shape[1]
+        assert tgt_seq_len <= src_seq_len
         tgt_src_mask = src_mask[:, :tgt_seq_len, :]
+
         # decoder_output shape: batch_size, seq_len, dim_model
         decoder_output = self.decode(
-            encoder_output, tgt_src_mask, decoder_input_features, decoder_input_mask
+            encoder_output, user_features, tgt_src_mask, decoder_input_features, decoder_input_mask
         )
         return decoder_output
 
@@ -100,28 +91,42 @@ class EncoderDecoder(nn.Module):
         # user_features: batch_size, dim_user
         # src_features: batch_size, seq_len, dim_vocab
         # src_mask shape: batch_size, seq_len + 1, seq_len + 1
+        batch_size, seq_len, _ = src_features.shape
 
-        # vocab_embed: batch_size, seq_len, dim_model
+        # vocab_embed: batch_size, seq_len, dim_model/2
         vocab_embed = self.vocab_embedder(src_features)
-        # user_embed: batch_size, dim_model
+        # user_embed: batch_size, dim_model/2
         user_embed = self.user_embedder(user_features)
-        # src_embed: batch_size, seq_len + 1, dim_model
-        src_embed = torch.cat((user_embed.unsqueeze(1), vocab_embed), dim=1)
-        src_embed = self.positional_encoding(src_embed)
+        # user_embed: batch_size, seq_len, dim_model/2
+        user_embed = user_embed.repeat(1, seq_len).reshape(batch_size, seq_len, -1)
+
+        # src_embed shape: batch_size, seq_len, dim_model
+        src_embed = self.positional_encoding(
+            torch.cat((user_embed, vocab_embed), dim=-1)
+        )
 
         # encoder_output shape: batch_size, seq_len + 1, dim_model
         return self.encoder(src_embed, src_mask)
 
-    def decode(self, memory, tgt_src_mask, decoder_input_features, decoder_input_mask):
+    def decode(self, memory, user_features, tgt_src_mask, decoder_input_features, decoder_input_mask):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
         # tgt_src_mask shape: batch_size, seq_len, seq_len + 1
         # decoder_input_features shape: batch_size, seq_len, dim_vocab
         # decoder_input_mask shape: batch_size, seq_len, seq_len
+        batch_size, seq_len, _ = decoder_input_features.shape
 
-        # decoder_input_embed shape: batch_size, seq_len, dim_model
+        # decoder_input_embed shape: batch_size, seq_len, dim_model/2
         decoder_input_embed = self.vocab_embedder(decoder_input_features)
-        decoder_input_embed = self.positional_encoding(decoder_input_embed)
+        # user_embed: batch_size, dim_model/2
+        user_embed = self.user_embedder(user_features)
+        # user_embed: batch_size, seq_len, dim_model/2
+        user_embed = user_embed.repeat(1, seq_len).reshape(batch_size, seq_len, -1)
+
+        # decoder_input_embed: batch_size, seq_len, dim_model
+        decoder_input_embed = self.positional_encoding(
+            torch.cat((user_embed, decoder_input_embed), dim=-1)
+        )
 
         # return shape: batch_size, seq_len, dim_model
         return self.decoder(decoder_input_embed, memory, tgt_src_mask, decoder_input_mask)
@@ -321,28 +326,28 @@ class PositionwiseFeedForward(nn.Module):
 class VocabEmbedder(nn.Module):
     def __init__(self, dim_vocab, dim_model):
         super(VocabEmbedder, self).__init__()
-        self.linear = nn.Linear(dim_vocab, dim_model)
-        self.dim_model = dim_model
+        self.dim_model = dim_model // 2
         self.dim_vocab = dim_vocab
+        self.linear = nn.Linear(self.dim_vocab, self.dim_model)
 
     def forward(self, x):
         # x: raw input features. Shape: batch_size, seq_len, dim_vocab
         output = self.linear(x) * math.sqrt(self.dim_model)
-        # output shape: batch_size, seq_len, dim_model
+        # output shape: batch_size, seq_len, dim_model / 2
         return output
 
 
 class UserEmbedder(nn.Module):
     def __init__(self, dim_user, dim_model):
         super(UserEmbedder, self).__init__()
-        self.linear = nn.Linear(dim_user, dim_model)
-        self.dim_model = dim_model
-        self.dim_vocab = dim_user
+        self.dim_model = dim_model // 2
+        self.dim_user = dim_user
+        self.linear = nn.Linear(self.dim_user, self.dim_model)
 
     def forward(self, x):
         # x: raw input features. Shape: batch_size, seq_len, dim_user
         output = self.linear(x) * math.sqrt(self.dim_model)
-        # output shape: batch_size, seq_len, dim_model
+        # output shape: batch_size, seq_len, dim_model / 2
         return output
 
 
