@@ -11,6 +11,7 @@ from reinforce_transformer_classes import (
     embedding,
     subsequent_mask,
     VocabEmbedder,
+    UserEmbedder,
     PositionalEncoding,
     PositionwiseFeedForward,
     MultiHeadedAttention,
@@ -31,6 +32,7 @@ def make_model(
     max_seq_len,
     num_stacked_layers=6,
     vocab_dim=16,
+    user_dim=20,
     dim_model=512,
     dim_feedforward=512,
     num_heads=8,
@@ -43,7 +45,8 @@ def make_model(
     model = EncoderDecoder(
         encoder=Encoder(EncoderLayer(dim_model, c(attn), c(ff)), num_stacked_layers),
         decoder=Decoder(DecoderLayer(dim_model, c(attn), c(attn), c(ff)), num_stacked_layers),
-        vocab_embedder=VocabEmbedder(vocab_dim, dim_model, c(position)),
+        vocab_embedder=VocabEmbedder(vocab_dim, dim_model),
+        user_embedder=UserEmbedder(user_dim, dim_model),
         generator=Generator(dim_model, vocab_size),
         positional_encoding=c(position),
     )

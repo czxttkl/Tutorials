@@ -61,22 +61,24 @@ class EncoderDecoder(nn.Module):
     other models.
     """
 
-    def __init__(self, encoder, decoder, vocab_embedder, generator, positional_encoding):
+    def __init__(self, encoder, decoder, vocab_embedder, user_embedder, generator, positional_encoding):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.vocab_embedder = vocab_embedder
+        self.user_embedder = user_embedder
         self.generator = generator
         self.positional_encoding = positional_encoding
 
     def forward(self, src_features, decoder_input_features, src_mask, decoder_input_mask):
         "Take in and process masked src and target sequences."
-        # encode_output shape: batch_size, seq_len, dim_model
-        encode_output = self.encode(src_features, src_mask)
-        decode_output = self.decode(
-            encode_output, src_mask, decoder_input_features, decoder_input_mask
+        # encoder_output shape: batch_size, seq_len, dim_model
+        encoder_output = self.encode(src_features, src_mask)
+        # decoder_output shape: batch_size, seq_len, dim_model
+        decoder_output = self.decode(
+            encoder_output, src_mask, decoder_input_features, decoder_input_mask
         )
-        return decode_output
+        return decoder_output
 
     def encode(self, src_features, src_mask):
         # src_features: batch_size, seq_len, dim_vocab
@@ -84,6 +86,9 @@ class EncoderDecoder(nn.Module):
 
         # src_embed: batch_size, seq_len, dim_model
         src_embed = self.vocab_embedder(src_features)
+        src_embed = self.positional_encoding(src_embed)
+
+        # encoder_output shape: batch_size, seq_len, dim_model
         return self.encoder(src_embed, src_mask)
 
     def decode(self, memory, src_mask, decoder_input_features, decoder_input_mask):
@@ -95,6 +100,7 @@ class EncoderDecoder(nn.Module):
 
         # decoder_input_embed shape: batch_size, seq_len, dim_model
         decoder_input_embed = self.vocab_embedder(decoder_input_features)
+        decoder_input_embed = self.positional_encoding(decoder_input_embed)
 
         # return shape: batch_size, seq_len, dim_model
         return self.decoder(decoder_input_embed, memory, src_mask, decoder_input_mask)
@@ -292,17 +298,29 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class VocabEmbedder(nn.Module):
-    def __init__(self, dim_vocab, dim_model, positional_encoding):
+    def __init__(self, dim_vocab, dim_model):
         super(VocabEmbedder, self).__init__()
         self.linear = nn.Linear(dim_vocab, dim_model)
-        self.positional_encoding = positional_encoding
         self.dim_model = dim_model
         self.dim_vocab = dim_vocab
 
     def forward(self, x):
         # x: raw input features. Shape: batch_size, seq_len, dim_vocab
         output = self.linear(x) * math.sqrt(self.dim_model)
-        output = self.positional_encoding(output)
+        # output shape: batch_size, seq_len, dim_model
+        return output
+
+
+class UserEmbedder(nn.Module):
+    def __init__(self, dim_user, dim_model):
+        super(UserEmbedder, self).__init__()
+        self.linear = nn.Linear(dim_user, dim_model)
+        self.dim_model = dim_model
+        self.dim_vocab = dim_user
+
+    def forward(self, x):
+        # x: raw input features. Shape: batch_size, seq_len, dim_user
+        output = self.linear(x) * math.sqrt(self.dim_model)
         # output shape: batch_size, seq_len, dim_model
         return output
 
