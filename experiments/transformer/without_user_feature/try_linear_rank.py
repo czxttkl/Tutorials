@@ -1,14 +1,10 @@
 import copy
-import math
 import time
 
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
-from transformer_classes import (
-    clones,
+from without_user_feature.transformer_classes import (
     subsequent_mask,
     Embeddings,
     PositionalEncoding,
