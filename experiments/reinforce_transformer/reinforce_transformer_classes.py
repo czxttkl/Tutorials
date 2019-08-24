@@ -5,6 +5,37 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from scipy.stats.stats import pearsonr
+from itertools import combinations
+
+
+def eval_function_corr(log_probs, rewards):
+    r, p_value = pearsonr(rewards, log_probs)
+    return r
+
+
+def eval_function_high_reward_prob(log_probs, rewards):
+    print(rewards[:20])
+    print(log_probs[:20])
+    print(
+        "reward=0", np.mean(log_probs[rewards == 0]),
+        "reward=2", np.mean(log_probs[rewards == 2]),
+        "reward=3", np.mean(log_probs[rewards == 3]),
+        "reward=4", np.mean(log_probs[rewards == 4])
+    )
+    return np.mean(log_probs[rewards == 0])
+
+
+def reward_function_f1(user_feature, vocab_feature, tgt_idx, truth_idx):
+    # return np.sum(tgt_idx == truth_idx)
+    return np.sum(tgt_idx != truth_idx)
+
+
+def reward_function_pairwise(user_feature, vocab_feature, tgt_idx, truth_idx):
+    # return np.sum(tgt_idx == truth_idx)
+    truth_pairs = set(combinations(truth_idx, 2))
+    tgt_pairs = set(combinations(tgt_idx, 2))
+    return len(truth_pairs - tgt_pairs)
 
 
 def embedding(idx, table):
@@ -75,10 +106,11 @@ class EncoderDecoder(nn.Module):
         # encoder_output shape: batch_size, seq_len + 1, dim_model
         encoder_output = self.encode(user_features, src_features, src_mask)
 
-        # tgt_src_mask shape: batch_size, seq_len, seq_len + 1
         tgt_seq_len = decoder_input_features.shape[1]
         src_seq_len = src_features.shape[1]
         assert tgt_seq_len <= src_seq_len
+
+        # tgt_src_mask shape: batch_size, seq_len, seq_len
         tgt_src_mask = src_mask[:, :tgt_seq_len, :]
 
         # decoder_output shape: batch_size, seq_len, dim_model
@@ -90,7 +122,7 @@ class EncoderDecoder(nn.Module):
     def encode(self, user_features, src_features, src_mask):
         # user_features: batch_size, dim_user
         # src_features: batch_size, seq_len, dim_vocab
-        # src_mask shape: batch_size, seq_len + 1, seq_len + 1
+        # src_mask shape: batch_size, seq_len, seq_len
         batch_size, seq_len, _ = src_features.shape
 
         # vocab_embed: batch_size, seq_len, dim_model/2
@@ -111,7 +143,7 @@ class EncoderDecoder(nn.Module):
     def decode(self, memory, user_features, tgt_src_mask, decoder_input_features, decoder_input_mask):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
-        # tgt_src_mask shape: batch_size, seq_len, seq_len + 1
+        # tgt_src_mask shape: batch_size, seq_len, seq_len
         # decoder_input_features shape: batch_size, seq_len, dim_vocab
         # decoder_input_mask shape: batch_size, seq_len, seq_len
         batch_size, seq_len, _ = decoder_input_features.shape
@@ -169,7 +201,9 @@ class Generator(nn.Module):
         batch_size, seq_len = decoder_input_idx.shape
         mask_indices = torch.tril(decoder_input_idx.repeat(1, seq_len).reshape(batch_size, seq_len, seq_len), diagonal=0)
         logits.scatter_(2, mask_indices, float("-inf"))
-        return F.log_softmax(logits, dim=-1)
+        # log_probs shape: batch_size, seq_len, vocab_size
+        log_probs = F.log_softmax(logits, dim=-1)
+        return log_probs
 
     def greedy_decode(self, x, y_decoder):
         # x is the attention of the latest step from the decoder. Shape: batch_size, dim_model
@@ -410,21 +444,25 @@ class NoamOpt:
 class Batch:
     "Object for holding a batch of data with mask during training."
 
-    def __init__(self, user_features, src_mask, trg_idx, src_features, tgt_features, padding_symbol):
+    def __init__(self, user_features, src_mask, tgt_idx, truth_idx, src_features, tgt_features, rewards, padding_symbol):
         # user_features shape: batch_size, user_dim
-        # src_mask shape: batch_size, seq_len + 1, seq_len + 1
+        # src_mask shape: batch_size, seq_len, seq_len
         # tgt_idx shape: batch_size, seq_len + 1
-        # src_embed shape: batch_size, seq_len, vocab_dim
-        # tgt_embed shape: batch_size, seq_len + 1, vocab_dim
+        # truth_idx shape: batch_size, seq_len
+        # src_features shape: batch_size, seq_len, vocab_dim
+        # tgt_features shape: batch_size, seq_len + 1, vocab_dim (including the feature of starting symbol)
+        # rewards shape: batch_size
 
         batch_size, seq_len, _ = src_mask.shape
         self.src_mask = src_mask
         self.user_features = user_features
+        self.rewards = rewards
+        self.truth_idx = truth_idx
 
         # decoder_input_idx shape: batch_size, seq_len
-        self.decoder_input_idx = trg_idx[:, :-1]
+        self.decoder_input_idx = tgt_idx[:, :-1]
         # target_label_idx shape: batch_size, seq_len
-        self.target_label_idx = trg_idx[:, 1:]
+        self.target_label_idx = tgt_idx[:, 1:]
         # trg_mask shape: batch_size, seq_len, seq_len
         self.trg_mask = self.make_std_mask(self.decoder_input_idx, padding_symbol)
         # ntoken shape: batch_size * seq_len
@@ -434,6 +472,7 @@ class Batch:
         self.src_features = src_features
         # decoder_input_embed shape: batch_size x seq_len x vocab_dim
         self.decoder_input_features = tgt_features[:, :-1, :]
+
 
     @staticmethod
     def make_std_mask(tgt, pad):
@@ -463,61 +502,92 @@ class Batch:
 # print(crit(pred, label), crit.true_dist)
 
 
-class SimpleLossCompute:
-    "A simple loss compute and train function."
+class LogProbCompute:
+    """ Compute each sequence's generative log probability """
 
-    def __init__(self, generator, criterion, opt=None):
+    def __init__(self, generator):
         self.generator = generator
-        self.criterion = criterion
-        self.opt = opt
 
-    def __call__(self, x, decoder_input_idx, y_label, norm):
+    def __call__(self, x, decoder_input_idx, label_idx):
         # x: the attention x from the decoder. Shape: batch_size, seq_len, dim_model
         # decoder_input_idx: input to the decoder, the first symbol is always the starting symbol
-        # y_label shape: batch_size, seq_len
+        # decoder_input_idx shape: batch_size, seq_len
+        # label_idx shape: batch_size, seq_len
 
         # log probs: log probability distribution of each symbol
         # shape: batch_size, seq_len, vocab_size
-        log_probs = self.generator(x, decoder_input_idx)
-        loss = (
-            self.criterion(
-                log_probs.contiguous().view(-1, log_probs.size(-1)),
-                y_label.contiguous().view(-1)
-            )
-            / norm
-        )
-        loss.backward()
-        if self.opt is not None:
-            self.opt.step()
-            self.opt.zero_grad()
-        return loss * norm
+        raw_log_probs = self.generator(x, decoder_input_idx)
+        batch_size, seq_len, vocab_size = raw_log_probs.shape
+
+        # log_probs: each symbol of the label sequence's generative log probability
+        # shape: batch_size, seq_len
+        log_probs = raw_log_probs.view(-1, vocab_size)[
+            np.arange(batch_size * seq_len), label_idx.flatten()
+        ].view(batch_size, seq_len)
+
+        # shape: batch_size
+        return log_probs.sum(dim=1)
 
 
-class LabelSmoothing(nn.Module):
-    "Implement label smoothing."
+class BaselineNN(nn.Module):
 
-    def __init__(self, tgt_vocab_size, padding_idx, starting_idx, smoothing=0.0):
-        super(LabelSmoothing, self).__init__()
-        self.criterion = nn.KLDivLoss(reduction="sum")
-        self.padding_idx = padding_idx
-        self.starting_idx = starting_idx
-        self.confidence = 1.0 - smoothing
-        self.smoothing = smoothing
-        self.tgt_vocab_size = tgt_vocab_size
-        self.true_dist = None
+    def __init__(self, dim_model, user_dim, num_layers):
+        super(BaselineNN, self).__init__()
+        h_sizes = [user_dim] + [dim_model] * num_layers + [1]
+        self.num_layers = num_layers
+        self.hidden = nn.ModuleList()
+        for k in range(len(h_sizes) - 1):
+            self.hidden.append(nn.Linear(h_sizes[k], h_sizes[k + 1]))
 
-    def forward(self, x, target):
-        # x shape: flatten_batch_size x tgt_vocab_size
-        # target shape: flatten_batch_size
-        # flatten_batch_size = batch_size x seq_len
-        assert x.size(1) == self.tgt_vocab_size
-        true_dist = x.data.clone()
-        true_dist.fill_(self.smoothing / (self.tgt_vocab_size - 2))
-        true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
-        true_dist[:, self.padding_idx] = 0
-        true_dist[:, self.starting_idx] = 0
-        mask = torch.nonzero(target.data == self.padding_idx)
-        if mask.dim() > 0:
-            true_dist.index_fill_(0, mask.squeeze(), 0.0)
-        self.true_dist = true_dist
-        return self.criterion(x, true_dist)
+    def forward(self, x):
+        for i in range(self.num_layers + 1):
+            if i == self.num_layers:
+                return self.hidden[i](x)
+            else:
+                x = F.relu(self.hidden[i](x))
+
+
+class ReinforceLossCompute:
+
+    def __init__(self, rl_opt=None, baseline_opt=None):
+        self.rl_opt = rl_opt
+        self.baseline_opt = baseline_opt
+
+    def __call__(self, log_probs, reward, baseline, user_features):
+        # log_probs: the generative probability of each sequence
+        # Shape: batch_size
+        # reward: reward associated with each sequence
+        # reward shape: batch_size
+        # baseline: the baseline model
+        # user_features: the user feature associated with each sequence. Used to compute baseline
+        # shape: batch_size x user_dim
+        batch_size = log_probs.shape[0]
+
+        with torch.no_grad():
+            baseline.eval()
+            b = baseline(user_features).squeeze()
+            baseline.train()
+
+        assert b.shape == reward.shape == log_probs.shape
+        assert not b.requires_grad
+        assert not reward.requires_grad
+        assert log_probs.requires_grad
+
+        # add negative sign because we take gradient descent but we want to maximize rewards
+        # rl_loss = - 1. / batch_size * torch.sum(log_probs * (reward - b))
+        rl_loss = 1. / batch_size * torch.sum(log_probs * (reward ))
+        rl_loss.backward()
+        if self.rl_opt:
+            self.rl_opt.step()
+            self.rl_opt.zero_grad()
+
+        b = baseline(user_features).squeeze()
+        assert b.requires_grad
+        baseline_loss = 1. / batch_size * torch.sum((b - reward) ** 2)
+        baseline_loss.backward()
+        if self.baseline_opt:
+            self.baseline_opt.step()
+            self.baseline_opt.zero_grad()
+
+        return rl_loss.cpu().detach().numpy(), baseline_loss.cpu().detach().numpy()
+

@@ -8,8 +8,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from reinforce_transformer_classes import (
+    eval_function_high_reward_prob,
+    eval_function_corr,
+    reward_function_f1,
+    reward_function_pairwise,
     embedding,
     subsequent_mask,
+    ReinforceLossCompute,
+    LogProbCompute,
+    BaselineNN,
     VocabEmbedder,
     UserEmbedder,
     PositionalEncoding,
@@ -18,13 +25,20 @@ from reinforce_transformer_classes import (
     EncoderDecoder,
     EncoderLayer,
     Encoder,
-    SimpleLossCompute,
-    LabelSmoothing,
     Generator,
     DecoderLayer,
     Decoder,
     Batch
 )
+
+
+def make_baseline(
+    baseline_dim_model,
+    user_dim,
+    num_layers,
+    device,
+):
+    return BaselineNN(baseline_dim_model, user_dim, num_layers).to(device)
 
 
 def make_model(
@@ -60,13 +74,16 @@ def make_model(
     return model
 
 
-def run_epoch(epoch, data_iter, model, loss_compute):
+def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute, eval_function):
     "Standard Training and Logging Function"
     start = time.time()
-    total_tokens = 0
-    total_loss = 0
-    tokens = 0
+    total_rl_loss = 0.
+    total_baseline_loss = 0.
+    total_eval_res = 0.
+    tmp_tokens = 0
+
     for i, batch in enumerate(data_iter):
+        # out shape: batch_size, seq_len, dim_model
         out = model.forward(
             batch.user_features,
             batch.src_features,
@@ -74,48 +91,57 @@ def run_epoch(epoch, data_iter, model, loss_compute):
             batch.src_mask,
             batch.trg_mask
         )
-        # out shape: batch_size, seq_len, dim_model
-        loss = loss_compute(out, batch.decoder_input_idx, batch.target_label_idx, batch.ntokens)
-        loss = loss.cpu().detach().numpy()
-        ntokens = batch.ntokens.cpu().numpy()
+        # log_probs shape: batch_size
+        log_probs = log_prob_compute(out, batch.decoder_input_idx, batch.target_label_idx)
+        rl_loss, baseline_loss = loss_compute(log_probs, batch.rewards, baseline, batch.user_features)
+        eval_res = eval_function(log_probs.cpu().detach().numpy(), batch.rewards.cpu().detach().numpy())
 
-        total_loss += loss
-        total_tokens += ntokens
-        tokens += ntokens
-        avg_loss = loss / ntokens
+        ntokens = batch.ntokens.cpu().numpy()
+        total_eval_res += eval_res
+        total_rl_loss += rl_loss
+        total_baseline_loss += baseline_loss
+        tmp_tokens += ntokens
+        avg_rl_loss = rl_loss
+        avg_baseline_loss = baseline_loss
 
         if i and i % 10 == 9:
             elapsed = time.time() - start
             total_elapsed = time.time() - total_start_time
             print(
-                "Epoch %d Step: %d Loss: %f Tokens per Sec: %d Elapse: %.3f, %.3f"
+                "Epoch %d, Step: %d, RL Loss: %f, Bsl Loss: %f, Eval Res: %f, Tokens per Sec: %d, Elapse: %.3f, %.3f"
                 % (
                     epoch,
                     i,
-                    avg_loss,
-                    tokens / elapsed,
+                    avg_rl_loss,
+                    avg_baseline_loss,
+                    eval_res,
+                    tmp_tokens / elapsed,
                     elapsed,
                     total_elapsed,
                 )
             )
             start = time.time()
-            tokens = 0
+            tmp_tokens = 0
 
-        del loss
-        if avg_loss < 0.05:
-            break
+        # if avg_loss < 0.05:
+        #     break
 
-    return total_loss / total_tokens
+    return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), total_eval_res / (i + 1)
 
 
-def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_len, start_symbol, padding_symbol, device):
+def data_gen(
+    user_dim, vocab_dim, batch_size, num_batches, max_seq_len, start_symbol, padding_symbol, reward_function, device
+):
     """
     Generate random data for a src-tgt copy task.
     """
     for _ in range(num_batches):
         user_features = np.random.randn(batch_size, user_dim).astype(np.float32)
-        # user_features = np.zeros((batch_size, user_dim)).astype(np.float32)
 
+        # rewards shape: batch_size
+        rewards = np.zeros(batch_size).astype(np.float32)
+        # truth_idx shape: batch_size
+        truth_idx = np.zeros((batch_size, max_seq_len)).astype(np.long)
         # src_idx shape: batch_size x seq_len
         src_idx = np.full((batch_size, max_seq_len), padding_symbol).astype(np.long)
         # src_mask shape: batch_size x seq_len x seq_len
@@ -146,9 +172,12 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
             sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1) * order) + 2
-            tgt_idx[i, 1:1+random_seq_len] = sort_idx
+            tgt_idx[i, 1:1+random_seq_len] = np.random.permutation(sort_idx)
             src_features[i] = embedding(src_idx[i], vocab_features)
             tgt_features[i] = embedding(tgt_idx[i], vocab_features)
+
+            truth_idx[i] = sort_idx
+            rewards[i] = reward_function(user_features[i], vocab_features, tgt_idx[i, 1:], truth_idx[i])
 
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
@@ -157,21 +186,21 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
         yield Batch(
             user_features=torch.from_numpy(user_features).to(device),
             src_mask=torch.from_numpy(src_mask).to(device),
-            trg_idx=torch.from_numpy(tgt_idx).to(device),
+            tgt_idx=torch.from_numpy(tgt_idx).to(device),
+            truth_idx=torch.from_numpy(truth_idx).to(device),
             src_features=torch.from_numpy(src_features).to(device),
             tgt_features=torch.from_numpy(tgt_features).to(device),
-            padding_symbol=padding_symbol
+            rewards=torch.from_numpy(rewards).to(device),
+            padding_symbol=padding_symbol,
         )
 
 
-
-# src vocab size equals to tgt vocab size
 # vocab symbol includes padding symbol (0) and sequence starting symbol (1)
 PADDING_SYMBOL = 0
 START_SYMBOL = 1
 DIM_USER = 4
 VOCAB_DIM = 4
-MAX_SEQ_LEN = 7
+MAX_SEQ_LEN = 4
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 32
@@ -179,11 +208,17 @@ DIM_FEEDFORWARD = 512
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 10000
+NUM_TRAIN_BATCHES = 1000
 NUM_EVAL_BATCHES = 5
 
+BASELINE_DIM_MODEL = DIM_FEEDFORWARD
+BASELINE_LAYERS = 2
+
+# reward_function = reward_function_f1
+reward_function = reward_function_pairwise
+# eval_function = eval_function_corr
+eval_function = eval_function_high_reward_prob
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=PADDING_SYMBOL, starting_idx=START_SYMBOL, smoothing=0.0)
 model = make_model(
     vocab_size=VOCAB_SIZE,
     vocab_dim=VOCAB_DIM,
@@ -195,6 +230,12 @@ model = make_model(
     num_heads=NUM_HEADS,
     device=device,
 )
+baseline = make_baseline(
+    baseline_dim_model=BASELINE_DIM_MODEL,
+    user_dim=DIM_USER,
+    num_layers=BASELINE_LAYERS,
+    device=device,
+)
 # model_opt = NoamOpt(
 #     dim_model=DIM_MODEL,
 #     factor=1,
@@ -202,13 +243,14 @@ model = make_model(
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
 model_opt = torch.optim.Adam(model.parameters(), amsgrad=True)
+baseline_opt = torch.optim.Adam(baseline.parameters(), amsgrad=True)
+
 total_start_time = time.time()
 for epoch in range(EPOCH_NUM):
     model.train()
     run_epoch(
         epoch,
         data_gen(
-            vocab_size=VOCAB_SIZE,
             user_dim=DIM_USER,
             vocab_dim=VOCAB_DIM,
             batch_size=BATCH_SIZE,
@@ -216,18 +258,21 @@ for epoch in range(EPOCH_NUM):
             max_seq_len=MAX_SEQ_LEN,
             start_symbol=START_SYMBOL,
             padding_symbol=PADDING_SYMBOL,
+            reward_function=reward_function,
             device=device,
         ),
         model,
-        SimpleLossCompute(model.generator, criterion, model_opt),
+        baseline,
+        LogProbCompute(model.generator),
+        ReinforceLossCompute(model_opt, baseline_opt),
+        eval_function,
     )
     model.eval()
     print(
-        "eval loss:",
+        "eval rl/baseline loss:",
         run_epoch(
             epoch,
             data_gen(
-                vocab_size=VOCAB_SIZE,
                 user_dim=DIM_USER,
                 vocab_dim=VOCAB_DIM,
                 batch_size=BATCH_SIZE,
@@ -235,10 +280,14 @@ for epoch in range(EPOCH_NUM):
                 max_seq_len=MAX_SEQ_LEN,
                 start_symbol=START_SYMBOL,
                 padding_symbol=PADDING_SYMBOL,
+                reward_function=reward_function,
                 device=device,
             ),
             model,
-            SimpleLossCompute(model.generator, criterion, None),
+            baseline,
+            LogProbCompute(model.generator),
+            ReinforceLossCompute(None, None),
+            eval_function,
         ),
     )
 total_elapse_time = time.time() - total_start_time

@@ -157,7 +157,7 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
         yield Batch(
             user_features=torch.from_numpy(user_features).to(device),
             src_mask=torch.from_numpy(src_mask).to(device),
-            trg_idx=torch.from_numpy(tgt_idx).to(device),
+            tgt_idx=torch.from_numpy(tgt_idx).to(device),
             src_features=torch.from_numpy(src_features).to(device),
             tgt_features=torch.from_numpy(tgt_features).to(device),
             padding_symbol=padding_symbol
