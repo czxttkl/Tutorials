@@ -168,7 +168,7 @@ def data_gen(
             # symbol 0 is used for padding and symbol 1 is used for starting symbol.
             src_idx[i] = np.arange(VOCAB_SIZE)[2:]
             src_idx[i, random_seq_len:] = padding_symbol
-            src_mask[i] = (src_idx[i] != padding_symbol).repeat(max_seq_len).reshape((max_seq_len, max_seq_len))
+            src_mask[i] = (src_idx[i] != padding_symbol).tile(max_seq_len).reshape((max_seq_len, max_seq_len))
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
             sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1) * order) + 2
@@ -242,8 +242,8 @@ baseline = make_baseline(
 #     warmup=400,
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
-model_opt = torch.optim.Adam(model.parameters(), amsgrad=True)
-baseline_opt = torch.optim.Adam(baseline.parameters(), amsgrad=True)
+model_opt = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
+baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-3, amsgrad=True)
 
 total_start_time = time.time()
 for epoch in range(EPOCH_NUM):
