@@ -130,7 +130,7 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
 
 
 def data_gen(
-    user_dim, vocab_dim, batch_size, num_batches, max_seq_len, start_symbol, padding_symbol, reward_function, device
+        user_dim, vocab_dim, batch_size, num_batches, max_seq_len, start_symbol, padding_symbol, reward_function, device
 ):
     """
     Generate random data for a src-tgt copy task.
@@ -168,7 +168,7 @@ def data_gen(
             # symbol 0 is used for padding and symbol 1 is used for starting symbol.
             src_idx[i] = np.arange(VOCAB_SIZE)[2:]
             src_idx[i, random_seq_len:] = padding_symbol
-            src_mask[i] = (src_idx[i] != padding_symbol).tile(max_seq_len).reshape((max_seq_len, max_seq_len))
+            src_mask[i] = np.tile(src_idx[i] != padding_symbol, (max_seq_len, 1))
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
             sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1) * order) + 2
@@ -264,7 +264,7 @@ for epoch in range(EPOCH_NUM):
         model,
         baseline,
         LogProbCompute(model.generator),
-        ReinforceLossCompute(model_opt, baseline_opt),
+        ReinforceLossCompute(on_policy=False, rl_opt=model_opt, baseline_opt=baseline_opt),
         eval_function,
     )
     model.eval()
@@ -286,7 +286,7 @@ for epoch in range(EPOCH_NUM):
             model,
             baseline,
             LogProbCompute(model.generator),
-            ReinforceLossCompute(None, None),
+            ReinforceLossCompute(on_policy=False, rl_opt=None, baseline_opt=None),
             eval_function,
         ),
     )

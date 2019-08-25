@@ -15,13 +15,14 @@ def eval_function_corr(log_probs, rewards):
 
 
 def eval_function_high_reward_prob(log_probs, rewards):
-    print(rewards[:20])
-    print(log_probs[:20])
+    print("rewards", rewards[:20])
     print(
         "reward=0", np.mean(log_probs[rewards == 0]),
         "reward=2", np.mean(log_probs[rewards == 2]),
         "reward=3", np.mean(log_probs[rewards == 3]),
-        "reward=4", np.mean(log_probs[rewards == 4])
+        "reward=4", np.mean(log_probs[rewards == 4]),
+        "reward=5", np.mean(log_probs[rewards == 5]),
+        "reward=6", np.mean(log_probs[rewards == 6]),
     )
     return np.mean(log_probs[rewards == 0])
 
@@ -549,7 +550,8 @@ class BaselineNN(nn.Module):
 
 class ReinforceLossCompute:
 
-    def __init__(self, rl_opt=None, baseline_opt=None):
+    def __init__(self, on_policy, rl_opt=None, baseline_opt=None):
+        self.on_policy = on_policy
         self.rl_opt = rl_opt
         self.baseline_opt = baseline_opt
 
@@ -573,9 +575,14 @@ class ReinforceLossCompute:
         assert not reward.requires_grad
         assert log_probs.requires_grad
 
+        # importance sampling
+        probs = torch.exp(log_probs.detach()) if not self.on_policy else 1
         # add negative sign because we take gradient descent but we want to maximize rewards
         # rl_loss = - 1. / batch_size * torch.sum(log_probs * (reward - b))
-        rl_loss = 1. / batch_size * torch.sum(log_probs * (reward ))
+        batch_loss = probs * log_probs * (reward - b)
+        print("\nin trainer batch_loss", batch_loss[:20])
+        print("in trainer log probs", log_probs[:20])
+        rl_loss = 1. / batch_size * torch.sum(batch_loss)
         rl_loss.backward()
         if self.rl_opt:
             self.rl_opt.step()

@@ -66,7 +66,7 @@ def reinforce(env, policy_estimator, num_episodes=2000,
     baseline = Baseline(env)
     optimizer = optim.Adam(policy_estimator.parameters(), lr=0.01)
     baseline_optimizer = optim.Adam(baseline.parameters())
-    reinforce_trainer = ReinforceLossCompute(optimizer, baseline_optimizer)
+    reinforce_trainer = ReinforceLossCompute(True, optimizer, baseline_optimizer)
 
     action_space = np.arange(env.action_space.n)
     for ep in range(num_episodes):
