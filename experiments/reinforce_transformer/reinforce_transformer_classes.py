@@ -209,7 +209,7 @@ class Generator(nn.Module):
         log_probs = F.log_softmax(logits, dim=-1)
         return log_probs
 
-    def greedy_decode(self, x, y_decoder):
+    def decode(self, x, y_decoder):
         # x is the attention of the latest step from the decoder. Shape: batch_size, dim_model
         # y_decoder: input to the decoder, the first symbol is always the starting symbol
         # Shape: batch_size, seq_len
