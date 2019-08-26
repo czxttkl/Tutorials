@@ -35,9 +35,11 @@ def reward_function_f1(user_feature, vocab_feature, tgt_idx, truth_idx):
 
 def reward_function_pairwise(user_feature, vocab_feature, tgt_idx, truth_idx):
     # return np.sum(tgt_idx == truth_idx)
+    if len(tgt_idx) == 1:
+        return float(tgt_idx[0] != truth_idx[0])
     truth_pairs = set(combinations(truth_idx, 2))
     tgt_pairs = set(combinations(tgt_idx, 2))
-    return len(truth_pairs - tgt_pairs)
+    return float(len(truth_pairs - tgt_pairs))
 
 
 def embedding(idx, table):
@@ -145,9 +147,9 @@ class EncoderDecoder(nn.Module):
     def decode(self, memory, user_features, tgt_src_mask, decoder_input_features, decoder_input_mask):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
-        # tgt_src_mask shape: batch_size, seq_len, seq_len
-        # decoder_input_features shape: batch_size, seq_len, dim_vocab
-        # decoder_input_mask shape: batch_size, seq_len, seq_len
+        # tgt_src_mask shape: batch_size, tgt_seq_len, seq_len
+        # decoder_input_features shape: batch_size, tgt_seq_len, dim_vocab
+        # decoder_input_mask shape: batch_size, tgt_seq_len, tgt_seq_len
         batch_size, seq_len, _ = decoder_input_features.shape
 
         # decoder_input_embed shape: batch_size, seq_len, dim_model/2
@@ -449,24 +451,23 @@ class Batch:
     def __init__(self, user_features, src_mask, tgt_idx, truth_idx, src_features, tgt_features, rewards, padding_symbol):
         # user_features shape: batch_size, user_dim
         # src_mask shape: batch_size, seq_len, seq_len
-        # tgt_idx shape: batch_size, seq_len + 1
-        # truth_idx shape: batch_size, seq_len
+        # tgt_idx shape: batch_size, tgt_seq_len + 1
+        # truth_idx shape: batch_size, tgt_seq_len
         # src_features shape: batch_size, seq_len, vocab_dim
-        # tgt_features shape: batch_size, seq_len + 1, vocab_dim (including the feature of starting symbol)
+        # tgt_features shape: batch_size, tgt_seq_len + 1, vocab_dim (including the feature of starting symbol)
         # rewards shape: batch_size
 
-        batch_size, seq_len, _ = src_mask.shape
         self.src_mask = src_mask
         self.user_features = user_features
         self.rewards = rewards
         self.truth_idx = truth_idx
 
-        # decoder_input_idx shape: batch_size, seq_len
+        # decoder_input_idx shape: batch_size, tgt_seq_len
         self.decoder_input_idx = tgt_idx[:, :-1]
-        # target_label_idx shape: batch_size, seq_len
+        # target_label_idx shape: batch_size, tgt_seq_len
         self.target_label_idx = tgt_idx[:, 1:]
-        # trg_mask shape: batch_size, seq_len, seq_len
-        self.trg_mask = self.make_std_mask(self.decoder_input_idx, padding_symbol)
+        # decoder_input_mask shape: batch_size, tgt_seq_len, tgt_seq_len
+        self.decoder_input_mask = self.make_std_mask(self.decoder_input_idx, padding_symbol)
         # ntoken shape: batch_size * seq_len
         self.ntokens = (self.target_label_idx != padding_symbol).data.sum()
 

@@ -89,7 +89,7 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
             batch.src_features,
             batch.decoder_input_features,
             batch.src_mask,
-            batch.trg_mask
+            batch.decoder_input_mask
         )
         # log_probs shape: batch_size
         log_probs = log_prob_compute(out, batch.decoder_input_idx, batch.target_label_idx)
@@ -130,7 +130,7 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
 
 
 def data_gen(
-        user_dim, vocab_dim, batch_size, num_batches, max_seq_len, start_symbol, padding_symbol, reward_function, device
+    user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
 ):
     """
     Generate random data for a src-tgt copy task.
@@ -141,13 +141,13 @@ def data_gen(
         # rewards shape: batch_size
         rewards = np.zeros(batch_size).astype(np.float32)
         # truth_idx shape: batch_size
-        truth_idx = np.zeros((batch_size, max_seq_len)).astype(np.long)
+        truth_idx = np.zeros((batch_size, tgt_seq_len)).astype(np.long)
         # src_idx shape: batch_size x seq_len
         src_idx = np.full((batch_size, max_seq_len), padding_symbol).astype(np.long)
         # src_mask shape: batch_size x seq_len x seq_len
         src_mask = np.ones((batch_size, max_seq_len, max_seq_len)).astype(np.int8)
         # tgt_idx shape: batch_size x (seq_len + 1)
-        tgt_idx = np.full((batch_size, max_seq_len + 1), padding_symbol).astype(np.long)
+        tgt_idx = np.full((batch_size, tgt_seq_len + 1), padding_symbol).astype(np.long)
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
         tgt_idx[:, 0] = start_symbol
@@ -155,7 +155,7 @@ def data_gen(
         # src_features shape: batch_size x seq_len x vocab_dim
         # tgt_features shape: batch_size x (seq_len + 1) x vocab_dim
         src_features = np.zeros((batch_size, max_seq_len, vocab_dim)).astype(np.float32)
-        tgt_features = np.zeros((batch_size, max_seq_len + 1, vocab_dim)).astype(np.float32)
+        tgt_features = np.zeros((batch_size, tgt_seq_len + 1, vocab_dim)).astype(np.float32)
 
         for i in range(batch_size):
             vocab_features = np.random.randn(VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
@@ -172,7 +172,7 @@ def data_gen(
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
             sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1) * order) + 2
-            tgt_idx[i, 1:1 + random_seq_len] = np.random.permutation(sort_idx)
+            tgt_idx[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
             # while True:
             #     tgt_idx[i, 1:1+random_seq_len] = np.random.permutation(sort_idx)
             #     if reward_function_pairwise(user_features, vocab_features, tgt_idx[i, 1:1+random_seq_len], sort_idx) in [0, 1]:
@@ -180,7 +180,7 @@ def data_gen(
             src_features[i] = embedding(src_idx[i], vocab_features)
             tgt_features[i] = embedding(tgt_idx[i], vocab_features)
 
-            truth_idx[i] = sort_idx
+            truth_idx[i] = sort_idx[:tgt_seq_len]
             rewards[i] = reward_function(user_features[i], vocab_features, tgt_idx[i, 1:], truth_idx[i])
 
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
@@ -205,6 +205,7 @@ START_SYMBOL = 1
 DIM_USER = 4
 VOCAB_DIM = 4
 MAX_SEQ_LEN = 3
+TARGET_SEQ_LEN = 2
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 32
@@ -260,6 +261,7 @@ for epoch in range(EPOCH_NUM):
             batch_size=BATCH_SIZE,
             num_batches=NUM_TRAIN_BATCHES,
             max_seq_len=MAX_SEQ_LEN,
+            tgt_seq_len=TARGET_SEQ_LEN,
             start_symbol=START_SYMBOL,
             padding_symbol=PADDING_SYMBOL,
             reward_function=reward_function,
@@ -282,6 +284,7 @@ for epoch in range(EPOCH_NUM):
                 batch_size=BATCH_SIZE,
                 num_batches=NUM_EVAL_BATCHES,
                 max_seq_len=MAX_SEQ_LEN,
+                tgt_seq_len=TARGET_SEQ_LEN,
                 start_symbol=START_SYMBOL,
                 padding_symbol=PADDING_SYMBOL,
                 reward_function=reward_function,
@@ -299,12 +302,12 @@ print(f"Total time: {total_elapse_time}")
 
 
 def greedy_decode(
-    model, user_features, vocab_features, src_features, src_mask, max_seq_len
+    model, user_features, vocab_features, src_features, src_mask, tgt_seq_len
 ):
     batch_size = src_features.shape[0]
     memory = model.encode(user_features, src_features, src_mask)
     decoder_input_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
-    for l in range(max_seq_len):
+    for l in range(tgt_seq_len):
         decoder_input_features = torch.tensor(
             [embedding(decoder_input_idx[i], vocab_features[i]) for i in range(batch_size)]
         ).to(device)
@@ -338,11 +341,11 @@ user_features = torch.randn(test_batch_size, DIM_USER)
 user_features[0] = -0.1
 user_features[1] = 0.1
 user_features = user_features.to(device)
-src_embed = torch.from_numpy(vocab_features[:, 2:, :]).to(device)
+src_features = torch.from_numpy(vocab_features[:, 2:, :]).to(device)
 src_mask = torch.from_numpy(
     np.ones((test_batch_size, MAX_SEQ_LEN, MAX_SEQ_LEN))
 ).to(device)
-output_tgt = greedy_decode(model, user_features, vocab_features, src_embed, src_mask, max_seq_len=MAX_SEQ_LEN)
+output_tgt = greedy_decode(model, user_features, vocab_features, src_features, src_mask, tgt_seq_len=TARGET_SEQ_LEN)
 print(f"output seq:\n{output_tgt}")
 
 
