@@ -123,8 +123,8 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
             start = time.time()
             tmp_tokens = 0
 
-        # if avg_loss < 0.05:
-        #     break
+        if eval_res > -0.2:
+            break
 
     return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), total_eval_res / (i + 1)
 
@@ -172,7 +172,11 @@ def data_gen(
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
             sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1) * order) + 2
-            tgt_idx[i, 1:1+random_seq_len] = np.random.permutation(sort_idx)
+            tgt_idx[i, 1:1 + random_seq_len] = np.random.permutation(sort_idx)
+            # while True:
+            #     tgt_idx[i, 1:1+random_seq_len] = np.random.permutation(sort_idx)
+            #     if reward_function_pairwise(user_features, vocab_features, tgt_idx[i, 1:1+random_seq_len], sort_idx) in [0, 1]:
+            #         break
             src_features[i] = embedding(src_idx[i], vocab_features)
             tgt_features[i] = embedding(tgt_idx[i], vocab_features)
 
@@ -200,15 +204,15 @@ PADDING_SYMBOL = 0
 START_SYMBOL = 1
 DIM_USER = 4
 VOCAB_DIM = 4
-MAX_SEQ_LEN = 4
+MAX_SEQ_LEN = 3
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 32
 DIM_FEEDFORWARD = 512
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
-BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 1000
+BATCH_SIZE = 1280
+NUM_TRAIN_BATCHES = 10000
 NUM_EVAL_BATCHES = 5
 
 BASELINE_DIM_MODEL = DIM_FEEDFORWARD
@@ -242,8 +246,8 @@ baseline = make_baseline(
 #     warmup=400,
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
-model_opt = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
-baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-3, amsgrad=True)
+model_opt = torch.optim.Adam(model.parameters(), lr=1e-4, amsgrad=True)
+baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-4, amsgrad=True)
 
 total_start_time = time.time()
 for epoch in range(EPOCH_NUM):
@@ -303,18 +307,18 @@ def greedy_decode(
     for l in range(max_seq_len):
         decoder_input_features = torch.tensor(
             [embedding(decoder_input_idx[i], vocab_features[i]) for i in range(batch_size)]
-        )
+        ).to(device)
         tgt_src_mask = src_mask[:, :l + 1, :]
         out = model.decode(
             memory=memory,
             user_features=user_features,
             tgt_src_mask=tgt_src_mask,
             decoder_input_features=decoder_input_features,
-            decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type(torch.long),
+            decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type(torch.long).to(device),
         )
-        prob = model.generator.greedy_decode(out[:, -1, :], decoder_input_idx)
+        prob = model.generator.greedy_decode(out[:, -1, :], decoder_input_idx.to(device))
         _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.clone().detach().reshape(batch_size, 1)
+        next_word = next_word.cpu().clone().detach().reshape(batch_size, 1)
         decoder_input_idx = torch.cat(
             [decoder_input_idx, next_word],
             dim=1
@@ -333,10 +337,11 @@ print("correct order1", np.argsort(np.sum(vocab_features2[2:] * 1, axis=1)) + 2)
 user_features = torch.randn(test_batch_size, DIM_USER)
 user_features[0] = -0.1
 user_features[1] = 0.1
-src_embed = torch.from_numpy(vocab_features[:, 2:, :])
+user_features = user_features.to(device)
+src_embed = torch.from_numpy(vocab_features[:, 2:, :]).to(device)
 src_mask = torch.from_numpy(
     np.ones((test_batch_size, MAX_SEQ_LEN, MAX_SEQ_LEN))
-)
+).to(device)
 output_tgt = greedy_decode(model, user_features, vocab_features, src_embed, src_mask, max_seq_len=MAX_SEQ_LEN)
 print(f"output seq:\n{output_tgt}")
 
