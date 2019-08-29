@@ -180,6 +180,8 @@ def data_gen(
         vocab_features = np.random.randn(batch_size, VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
         vocab_features[:, padding_symbol] = 0.0
         vocab_features[:, start_symbol] = 0.0
+        # the last dim is the sum of all other dims
+        vocab_features[:, :, -1] = np.sum(vocab_features[:, :, :-1], axis=-1)
 
         # rewards shape: batch_size
         rewards = np.zeros(batch_size).astype(np.float32)
@@ -211,7 +213,7 @@ def data_gen(
             src_features[i] = embedding(src_idx[i], vocab_features[i])
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
-            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2+random_seq_len], axis=1) * order) + 2
+            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2+random_seq_len, :-1], axis=-1) * order) + 2
             truth_idx[i] = sort_idx[:tgt_seq_len]
 
         model.eval()
@@ -251,7 +253,7 @@ def data_gen(
 PADDING_SYMBOL = 0
 START_SYMBOL = 1
 DIM_USER = 4
-VOCAB_DIM = 4
+VOCAB_DIM = 5
 MAX_SEQ_LEN = 3
 TARGET_SEQ_LEN = 3
 VOCAB_SIZE = MAX_SEQ_LEN + 2
@@ -333,6 +335,7 @@ test_batch_size = 5
 user_features = np.random.randn(test_batch_size, DIM_USER).astype(np.float32)
 vocab_features = np.random.randn(test_batch_size, VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
 vocab_features[:, :2, :] = 0.0
+vocab_features[:, :, -1] = np.sum(vocab_features[:, :, :-1], axis=-1)
 for i in range(test_batch_size):
     order = 1. if np.sum(user_features[i]) > 0 else -1.
     print(f"{i}-th correct order ({order})", np.argsort(np.sum(vocab_features[i, 2:] * order, axis=1)) + 2)
