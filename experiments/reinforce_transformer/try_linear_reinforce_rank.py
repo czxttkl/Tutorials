@@ -79,7 +79,7 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
     start = time.time()
     total_rl_loss = 0.
     total_baseline_loss = 0.
-    total_eval_res = 0.
+    total_eval_res = []
     tmp_tokens = 0
 
     for i, batch in enumerate(data_iter):
@@ -97,7 +97,7 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
         eval_res = eval_function(log_probs.cpu().detach().numpy(), batch.rewards.cpu().detach().numpy())
 
         ntokens = batch.ntokens.cpu().numpy()
-        total_eval_res += eval_res
+        total_eval_res.append(eval_res)
         total_rl_loss += rl_loss
         total_baseline_loss += baseline_loss
         tmp_tokens += ntokens
@@ -123,10 +123,51 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
             start = time.time()
             tmp_tokens = 0
 
-        if eval_res > -0.2:
+        # off-policy learning is not stable. So once eval_res is below -0.1, it is a good sign of
+        # successful learning
+        if eval_res > -0.1:
             break
 
-    return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), total_eval_res / (i + 1)
+    return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), np.mean(total_eval_res)
+
+
+def decode(
+        model, user_features, vocab_features, src_features, src_mask, tgt_seq_len, greedy
+):
+    batch_size = src_features.shape[0]
+    vocab_size = vocab_features.shape[1]
+    memory = model.encode(user_features, src_features, src_mask)
+    decoder_input_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
+    decoder_probs = torch.zeros(batch_size, tgt_seq_len, vocab_size)
+    for l in range(tgt_seq_len):
+        decoder_input_features = torch.tensor(
+            [embedding(decoder_input_idx[i], vocab_features[i]) for i in range(batch_size)]
+        ).to(device)
+        tgt_src_mask = src_mask[:, :l + 1, :]
+        out = model.decode(
+            memory=memory,
+            user_features=user_features,
+            tgt_src_mask=tgt_src_mask,
+            decoder_input_features=decoder_input_features,
+            decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type(torch.long).to(device),
+        )
+        # batch_size, vocab_size
+        log_prob = model.generator.decode(out[:, -1, :], decoder_input_idx.to(device))
+        prob = torch.exp(log_prob)
+        decoder_probs[:, l, :] = prob
+        if greedy:
+            _, next_word = torch.max(prob, dim=1)
+        else:
+            next_word = torch.multinomial(prob, num_samples=1, replacement=False)
+        next_word = next_word.cpu().clone().detach().reshape(batch_size, 1)
+        decoder_input_idx = torch.cat(
+            [decoder_input_idx, next_word],
+            dim=1
+        )
+    # remove the starting symbol
+    # shape: batch_size, tgt_seq_len
+    decoder_input_idx = decoder_input_idx[:, 1:]
+    return decoder_probs, decoder_input_idx
 
 
 def data_gen(
@@ -137,6 +178,11 @@ def data_gen(
     """
     for _ in range(num_batches):
         user_features = np.random.randn(batch_size, user_dim).astype(np.float32)
+        vocab_features = np.random.randn(batch_size, VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
+        vocab_features[:, padding_symbol] = 0.0
+        vocab_features[:, start_symbol] = 0.0
+        # the last dim is the sum of all other dims
+        vocab_features[:, :, -1] = np.sum(vocab_features[:, :, :-1], axis=-1)
 
         # rewards shape: batch_size
         rewards = np.zeros(batch_size).astype(np.float32)
@@ -158,10 +204,6 @@ def data_gen(
         tgt_features = np.zeros((batch_size, tgt_seq_len + 1, vocab_dim)).astype(np.float32)
 
         for i in range(batch_size):
-            vocab_features = np.random.randn(VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
-            vocab_features[padding_symbol] = 0.0
-            vocab_features[start_symbol] = 0.0
-
             # random_seq_len = (i % max_seq_len) + 1
             random_seq_len = max_seq_len
 
@@ -169,19 +211,15 @@ def data_gen(
             src_idx[i] = np.arange(VOCAB_SIZE)[2:]
             src_idx[i, random_seq_len:] = padding_symbol
             src_mask[i] = np.tile(src_idx[i] != padding_symbol, (max_seq_len, 1))
+            src_features[i] = embedding(src_idx[i], vocab_features[i])
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
-            sort_idx = np.argsort(np.sum(vocab_features[2:2+random_seq_len], axis=1) * order) + 2
-            tgt_idx[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
-            # while True:
-            #     tgt_idx[i, 1:1+random_seq_len] = np.random.permutation(sort_idx)
-            #     if reward_function_pairwise(user_features, vocab_features, tgt_idx[i, 1:1+random_seq_len], sort_idx) in [0, 1]:
-            #         break
-            src_features[i] = embedding(src_idx[i], vocab_features)
-            tgt_features[i] = embedding(tgt_idx[i], vocab_features)
-
+            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2 + random_seq_len, :-1], axis=-1) * order) + 2
             truth_idx[i] = sort_idx[:tgt_seq_len]
-            rewards[i] = reward_function(user_features[i], vocab_features, tgt_idx[i, 1:], truth_idx[i])
+
+            tgt_idx[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
+            tgt_features[i] = embedding(tgt_idx[i], vocab_features[i])
+            rewards[i] = reward_function(user_features[i], vocab_features[i], tgt_idx[i, 1:], truth_idx[i])
 
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
@@ -213,7 +251,7 @@ DIM_FEEDFORWARD = 512
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 1280
-NUM_TRAIN_BATCHES = 10000
+NUM_TRAIN_BATCHES = 100000
 NUM_EVAL_BATCHES = 5
 
 BASELINE_DIM_MODEL = DIM_FEEDFORWARD
@@ -247,6 +285,7 @@ baseline = make_baseline(
 #     warmup=400,
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
+# off-policy learning is sensitive to learning rate. lr=1e-3 performs worse
 model_opt = torch.optim.Adam(model.parameters(), lr=1e-4, amsgrad=True)
 baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-4, amsgrad=True)
 
@@ -273,79 +312,28 @@ for epoch in range(EPOCH_NUM):
         ReinforceLossCompute(on_policy=False, rl_opt=model_opt, baseline_opt=baseline_opt),
         eval_function,
     )
-    model.eval()
-    print(
-        "eval rl/baseline loss:",
-        run_epoch(
-            epoch,
-            data_gen(
-                user_dim=DIM_USER,
-                vocab_dim=VOCAB_DIM,
-                batch_size=BATCH_SIZE,
-                num_batches=NUM_EVAL_BATCHES,
-                max_seq_len=MAX_SEQ_LEN,
-                tgt_seq_len=TARGET_SEQ_LEN,
-                start_symbol=START_SYMBOL,
-                padding_symbol=PADDING_SYMBOL,
-                reward_function=reward_function,
-                device=device,
-            ),
-            model,
-            baseline,
-            LogProbCompute(model.generator),
-            ReinforceLossCompute(on_policy=False, rl_opt=None, baseline_opt=None),
-            eval_function,
-        ),
-    )
+
 total_elapse_time = time.time() - total_start_time
 print(f"Total time: {total_elapse_time}")
 
 
-def greedy_decode(
-    model, user_features, vocab_features, src_features, src_mask, tgt_seq_len
-):
-    batch_size = src_features.shape[0]
-    memory = model.encode(user_features, src_features, src_mask)
-    decoder_input_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
-    for l in range(tgt_seq_len):
-        decoder_input_features = torch.tensor(
-            [embedding(decoder_input_idx[i], vocab_features[i]) for i in range(batch_size)]
-        ).to(device)
-        tgt_src_mask = src_mask[:, :l + 1, :]
-        out = model.decode(
-            memory=memory,
-            user_features=user_features,
-            tgt_src_mask=tgt_src_mask,
-            decoder_input_features=decoder_input_features,
-            decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type(torch.long).to(device),
-        )
-        prob = model.generator.greedy_decode(out[:, -1, :], decoder_input_idx.to(device))
-        _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.cpu().clone().detach().reshape(batch_size, 1)
-        decoder_input_idx = torch.cat(
-            [decoder_input_idx, next_word],
-            dim=1
-        )
-    return decoder_input_idx
-
-
 model.eval()
-test_batch_size = 2
-vocab_features1 = np.random.randn(VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
-vocab_features2 = np.random.randn(VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
-vocab_features = np.array([vocab_features1, vocab_features2])
+test_batch_size = 5
+user_features = np.random.randn(test_batch_size, DIM_USER).astype(np.float32)
+vocab_features = np.random.randn(test_batch_size, VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
 vocab_features[:, :2, :] = 0.0
-print("correct order1", np.argsort(np.sum(vocab_features1[2:] * -1, axis=1)) + 2)
-print("correct order1", np.argsort(np.sum(vocab_features2[2:] * 1, axis=1)) + 2)
-user_features = torch.randn(test_batch_size, DIM_USER)
-user_features[0] = -0.1
-user_features[1] = 0.1
-user_features = user_features.to(device)
+vocab_features[:, :, -1] = np.sum(vocab_features[:, :, :-1], axis=-1)
+for i in range(test_batch_size):
+    order = 1. if np.sum(user_features[i]) > 0 else -1.
+    print(f"{i}-th correct order ({order})", (np.argsort(np.sum(vocab_features[i, 2:] * order, axis=1)) + 2)[:TARGET_SEQ_LEN])
+
+user_features = torch.from_numpy(user_features).to(device)
 src_features = torch.from_numpy(vocab_features[:, 2:, :]).to(device)
 src_mask = torch.from_numpy(
     np.ones((test_batch_size, MAX_SEQ_LEN, MAX_SEQ_LEN))
 ).to(device)
-output_tgt = greedy_decode(model, user_features, vocab_features, src_features, src_mask, tgt_seq_len=TARGET_SEQ_LEN)
+decoder_probs, output_tgt = decode(model, user_features, vocab_features, src_features, src_mask, TARGET_SEQ_LEN, greedy=True)
 print(f"output seq:\n{output_tgt}")
+print(f"decoder probs:\n{decoder_probs}")
 
 

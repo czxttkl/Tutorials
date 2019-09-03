@@ -229,6 +229,7 @@ def data_gen(
         )
         tgt_idx[:, 1:1 + tgt_seq_len] = decode_idx
         model.train()
+
         for i in range(batch_size):
             tgt_features[i] = embedding(tgt_idx[i], vocab_features[i])
             rewards[i] = reward_function(user_features[i], vocab_features[i], tgt_idx[i, 1:], truth_idx[i])
@@ -338,7 +339,7 @@ vocab_features[:, :2, :] = 0.0
 vocab_features[:, :, -1] = np.sum(vocab_features[:, :, :-1], axis=-1)
 for i in range(test_batch_size):
     order = 1. if np.sum(user_features[i]) > 0 else -1.
-    print(f"{i}-th correct order ({order})", np.argsort(np.sum(vocab_features[i, 2:] * order, axis=1)) + 2)
+    print(f"{i}-th correct order ({order})", (np.argsort(np.sum(vocab_features[i, 2:] * order, axis=1)) + 2)[:TARGET_SEQ_LEN])
 
 user_features = torch.from_numpy(user_features).to(device)
 src_features = torch.from_numpy(vocab_features[:, 2:, :]).to(device)
