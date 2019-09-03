@@ -123,16 +123,15 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
             start = time.time()
             tmp_tokens = 0
 
-        # off-policy learning is not stable. So once eval_res is below -0.1, it is a good sign of
-        # successful learning
-        if eval_res > -0.1:
+        if np.all(np.array(total_eval_res[-10:]) > -0.05):
+            print(total_eval_res[-20:])
             break
 
     return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), np.mean(total_eval_res)
 
 
 def decode(
-        model, user_features, vocab_features, src_features, src_mask, tgt_seq_len, greedy
+    model, user_features, vocab_features, src_features, src_mask, tgt_seq_len, greedy
 ):
     batch_size = src_features.shape[0]
     vocab_size = vocab_features.shape[1]
@@ -171,7 +170,7 @@ def decode(
 
 
 def data_gen(
-    user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
+    model, user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
 ):
     """
     Generate random data for a src-tgt copy task.
@@ -214,10 +213,24 @@ def data_gen(
             src_features[i] = embedding(src_idx[i], vocab_features[i])
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
-            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2 + random_seq_len, :-1], axis=-1) * order) + 2
+            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2+random_seq_len, :-1], axis=-1) * order) + 2
             truth_idx[i] = sort_idx[:tgt_seq_len]
 
-            tgt_idx[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
+        model.eval()
+        # decode_idx shape: batch_size, tgt_seq_len
+        _, decode_idx = decode(
+            model,
+            torch.from_numpy(user_features).to(device),
+            vocab_features,
+            torch.from_numpy(src_features).to(device),
+            torch.from_numpy(src_mask).to(device),
+            tgt_seq_len,
+            False
+        )
+        tgt_idx[:, 1:1 + tgt_seq_len] = decode_idx
+        model.train()
+
+        for i in range(batch_size):
             tgt_features[i] = embedding(tgt_idx[i], vocab_features[i])
             rewards[i] = reward_function(user_features[i], vocab_features[i], tgt_idx[i, 1:], truth_idx[i])
 
@@ -241,9 +254,9 @@ def data_gen(
 PADDING_SYMBOL = 0
 START_SYMBOL = 1
 DIM_USER = 4
-VOCAB_DIM = 4
+VOCAB_DIM = 5
 MAX_SEQ_LEN = 3
-TARGET_SEQ_LEN = 2
+TARGET_SEQ_LEN = 3
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 32
@@ -285,9 +298,8 @@ baseline = make_baseline(
 #     warmup=400,
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
-# off-policy learning is sensitive to learning rate. lr=1e-3 performs worse
-model_opt = torch.optim.Adam(model.parameters(), lr=1e-4, amsgrad=True)
-baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-4, amsgrad=True)
+model_opt = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
+baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-3, amsgrad=True)
 
 total_start_time = time.time()
 for epoch in range(EPOCH_NUM):
@@ -295,6 +307,7 @@ for epoch in range(EPOCH_NUM):
     run_epoch(
         epoch,
         data_gen(
+            model=model,
             user_dim=DIM_USER,
             vocab_dim=VOCAB_DIM,
             batch_size=BATCH_SIZE,
@@ -309,12 +322,13 @@ for epoch in range(EPOCH_NUM):
         model,
         baseline,
         LogProbCompute(model.generator),
-        ReinforceLossCompute(on_policy=False, rl_opt=model_opt, baseline_opt=baseline_opt),
+        ReinforceLossCompute(on_policy=True, rl_opt=model_opt, baseline_opt=baseline_opt),
         eval_function,
     )
 
 total_elapse_time = time.time() - total_start_time
 print(f"Total time: {total_elapse_time}")
+
 
 
 model.eval()

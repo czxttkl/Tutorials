@@ -1,14 +1,10 @@
 import copy
-import math
 import time
 
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
-from transformer_classes import (
-    clones,
+from without_user_feature.transformer_classes import (
     subsequent_mask,
     Embeddings,
     PositionalEncoding,
@@ -69,17 +65,14 @@ def run_epoch(epoch, data_iter, model, loss_compute):
         total_loss += loss.detach().numpy()
         total_tokens += batch.ntokens.numpy()
         tokens += batch.ntokens.numpy()
-        avg_loss = loss.detach().numpy() / batch.ntokens.numpy()
         if i and i % 10 == 9:
             elapsed = time.time() - start
             print(
-                "Epoch %d Step: %d Loss: %f Tokens %f Elapse: %f Tokens per Sec: %f"
+                "Epoch %d Step: %d Loss: %f Tokens per Sec: %f"
                 % (
                     epoch,
                     i,
-                    avg_loss,
-                    tokens,
-                    elapsed,
+                    loss.detach().numpy() / batch.ntokens.numpy(),
                     tokens / elapsed,
                 )
             )
@@ -125,7 +118,7 @@ DIM_FEEDFORWARD = 256
 NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 128
-NUM_TRAIN_BATCHES = 1500
+NUM_TRAIN_BATCHES = 150
 NUM_EVAL_BATCHES = 5
 
 criterion = LabelSmoothing(tgt_vocab_size=VOCAB_SIZE, padding_idx=0, smoothing=0.0)
