@@ -156,10 +156,10 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
 
         yield Batch(
             user_features=torch.from_numpy(user_features).to(device),
-            src_mask=torch.from_numpy(src_mask).to(device),
-            tgt_idx=torch.from_numpy(tgt_idx).to(device),
+            src_src_mask=torch.from_numpy(src_mask).to(device),
+            tgt_idx_with_start_sym=torch.from_numpy(tgt_idx).to(device),
             src_features=torch.from_numpy(src_features).to(device),
-            tgt_features=torch.from_numpy(tgt_features).to(device),
+            tgt_features_with_start_sym=torch.from_numpy(tgt_features).to(device),
             padding_symbol=padding_symbol
         )
 
@@ -260,8 +260,8 @@ def greedy_decode(
             memory=memory,
             user_features=user_features,
             tgt_src_mask=tgt_src_mask,
-            decoder_input_features=decoder_input_features,
-            decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type(torch.long),
+            tgt_features=decoder_input_features,
+            tgt_tgt_mask=subsequent_mask(decoder_input_idx.size(1)).type(torch.long),
         )
         prob = model.generator.greedy_decode(out[:, -1, :], decoder_input_idx)
         _, next_word = torch.max(prob, dim=1)

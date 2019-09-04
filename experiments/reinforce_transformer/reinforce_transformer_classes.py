@@ -144,16 +144,16 @@ class EncoderDecoder(nn.Module):
         # encoder_output shape: batch_size, seq_len + 1, dim_model
         return self.encoder(src_embed, src_mask)
 
-    def decode(self, memory, user_features, tgt_src_mask, decoder_input_features, decoder_input_mask):
+    def decode(self, memory, user_features, tgt_src_mask, tgt_features, tgt_tgt_mask):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
         # tgt_src_mask shape: batch_size, tgt_seq_len, seq_len
-        # decoder_input_features shape: batch_size, tgt_seq_len, dim_vocab
-        # decoder_input_mask shape: batch_size, tgt_seq_len, tgt_seq_len
-        batch_size, seq_len, _ = decoder_input_features.shape
+        # tgt_features shape: batch_size, tgt_seq_len, dim_vocab
+        # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
+        batch_size, seq_len, _ = tgt_features.shape
 
         # decoder_input_embed shape: batch_size, seq_len, dim_model/2
-        decoder_input_embed = self.vocab_embedder(decoder_input_features)
+        decoder_input_embed = self.vocab_embedder(tgt_features)
         # user_embed: batch_size, dim_model/2
         user_embed = self.user_embedder(user_features)
         # user_embed: batch_size, seq_len, dim_model/2
@@ -165,7 +165,7 @@ class EncoderDecoder(nn.Module):
         )
 
         # return shape: batch_size, seq_len, dim_model
-        return self.decoder(decoder_input_embed, memory, tgt_src_mask, decoder_input_mask)
+        return self.decoder(decoder_input_embed, memory, tgt_src_mask, tgt_tgt_mask)
 
 
 class Encoder(nn.Module):
@@ -448,33 +448,35 @@ class NoamOpt:
 class Batch:
     "Object for holding a batch of data with mask during training."
 
-    def __init__(self, user_features, src_mask, tgt_idx, truth_idx, src_features, tgt_features, rewards, padding_symbol):
+    def __init__(
+        self, user_features, src_src_mask, tgt_idx_with_start_sym, truth_idx, src_features, tgt_features_with_start_sym, rewards, padding_symbol
+    ):
         # user_features shape: batch_size, user_dim
-        # src_mask shape: batch_size, seq_len, seq_len
-        # tgt_idx shape: batch_size, tgt_seq_len + 1
+        # src_src_mask shape: batch_size, seq_len, seq_len
+        # tgt_idx_with_start_sym shape: batch_size, tgt_seq_len + 1
         # truth_idx shape: batch_size, tgt_seq_len
         # src_features shape: batch_size, seq_len, vocab_dim
-        # tgt_features shape: batch_size, tgt_seq_len + 1, vocab_dim (including the feature of starting symbol)
+        # tgt_features_with_start_sym shape: batch_size, tgt_seq_len + 1, vocab_dim (including the feature of starting symbol)
         # rewards shape: batch_size
 
-        self.src_mask = src_mask
+        self.src_src_mask = src_src_mask
         self.user_features = user_features
         self.rewards = rewards
         self.truth_idx = truth_idx
 
-        # decoder_input_idx shape: batch_size, tgt_seq_len
-        self.decoder_input_idx = tgt_idx[:, :-1]
-        # target_label_idx shape: batch_size, tgt_seq_len
-        self.target_label_idx = tgt_idx[:, 1:]
-        # decoder_input_mask shape: batch_size, tgt_seq_len, tgt_seq_len
-        self.decoder_input_mask = self.make_std_mask(self.decoder_input_idx, padding_symbol)
+        # igt_idx shape: batch_size, tgt_seq_len
+        self.tgt_idx = tgt_idx_with_start_sym[:, :-1]
+        # label_idx shape: batch_size, tgt_seq_len
+        self.label_idx = tgt_idx_with_start_sym[:, 1:]
+        # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
+        self.tgt_tgt_mask = self.make_std_mask(self.tgt_idx, padding_symbol)
         # ntoken shape: batch_size * seq_len
-        self.ntokens = (self.target_label_idx != padding_symbol).data.sum()
+        self.ntokens = (self.label_idx != padding_symbol).data.sum()
 
-        # src_embed shape: batch_size x seq_len x vocab_dim
+        # src_features shape: batch_size x seq_len x vocab_dim
         self.src_features = src_features
-        # decoder_input_embed shape: batch_size x seq_len x vocab_dim
-        self.decoder_input_features = tgt_features[:, :-1, :]
+        # tgt_features shape: batch_size x seq_len x vocab_dim
+        self.tgt_features = tgt_features_with_start_sym[:, :-1, :]
 
 
     @staticmethod

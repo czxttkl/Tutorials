@@ -87,12 +87,12 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
         out = model.forward(
             batch.user_features,
             batch.src_features,
-            batch.decoder_input_features,
-            batch.src_mask,
-            batch.decoder_input_mask
+            batch.tgt_features,
+            batch.src_src_mask,
+            batch.tgt_tgt_mask
         )
         # log_probs shape: batch_size
-        log_probs = log_prob_compute(out, batch.decoder_input_idx, batch.target_label_idx)
+        log_probs = log_prob_compute(out, batch.tgt_idx, batch.label_idx)
         rl_loss, baseline_loss = loss_compute(log_probs, batch.rewards, baseline, batch.user_features)
         eval_res = eval_function(log_probs.cpu().detach().numpy(), batch.rewards.cpu().detach().numpy())
 
@@ -123,8 +123,9 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
             start = time.time()
             tmp_tokens = 0
 
-        if np.all(np.array(total_eval_res[-10:]) > -0.05):
-            print(total_eval_res[-20:])
+        # off-policy learning is not stable. So once eval_res is below -0.1, it is a good sign of
+        # successful learning
+        if eval_res > -0.1:
             break
 
     return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), np.mean(total_eval_res)
@@ -136,22 +137,22 @@ def decode(
     batch_size = src_features.shape[0]
     vocab_size = vocab_features.shape[1]
     memory = model.encode(user_features, src_features, src_mask)
-    decoder_input_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
+    tgt_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
     decoder_probs = torch.zeros(batch_size, tgt_seq_len, vocab_size)
     for l in range(tgt_seq_len):
-        decoder_input_features = torch.tensor(
-            [embedding(decoder_input_idx[i], vocab_features[i]) for i in range(batch_size)]
+        tgt_features = torch.tensor(
+            [embedding(tgt_idx[i], vocab_features[i]) for i in range(batch_size)]
         ).to(device)
         tgt_src_mask = src_mask[:, :l + 1, :]
         out = model.decode(
             memory=memory,
             user_features=user_features,
             tgt_src_mask=tgt_src_mask,
-            decoder_input_features=decoder_input_features,
-            decoder_input_mask=subsequent_mask(decoder_input_idx.size(1)).type(torch.long).to(device),
+            tgt_features=tgt_features,
+            tgt_tgt_mask=subsequent_mask(tgt_idx.size(1)).type(torch.long).to(device),
         )
         # batch_size, vocab_size
-        log_prob = model.generator.decode(out[:, -1, :], decoder_input_idx.to(device))
+        log_prob = model.generator.decode(out[:, -1, :], tgt_idx.to(device))
         prob = torch.exp(log_prob)
         decoder_probs[:, l, :] = prob
         if greedy:
@@ -159,18 +160,18 @@ def decode(
         else:
             next_word = torch.multinomial(prob, num_samples=1, replacement=False)
         next_word = next_word.cpu().clone().detach().reshape(batch_size, 1)
-        decoder_input_idx = torch.cat(
-            [decoder_input_idx, next_word],
+        tgt_idx = torch.cat(
+            [tgt_idx, next_word],
             dim=1
         )
     # remove the starting symbol
     # shape: batch_size, tgt_seq_len
-    decoder_input_idx = decoder_input_idx[:, 1:]
-    return decoder_probs, decoder_input_idx
+    tgt_idx = tgt_idx[:, 1:]
+    return decoder_probs, tgt_idx
 
 
 def data_gen(
-    model, user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
+    user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
 ):
     """
     Generate random data for a src-tgt copy task.
@@ -189,13 +190,13 @@ def data_gen(
         truth_idx = np.zeros((batch_size, tgt_seq_len)).astype(np.long)
         # src_idx shape: batch_size x seq_len
         src_idx = np.full((batch_size, max_seq_len), padding_symbol).astype(np.long)
-        # src_mask shape: batch_size x seq_len x seq_len
-        src_mask = np.ones((batch_size, max_seq_len, max_seq_len)).astype(np.int8)
+        # src_src_mask shape: batch_size x seq_len x seq_len
+        src_src_mask = np.ones((batch_size, max_seq_len, max_seq_len)).astype(np.int8)
         # tgt_idx shape: batch_size x (seq_len + 1)
-        tgt_idx = np.full((batch_size, tgt_seq_len + 1), padding_symbol).astype(np.long)
+        tgt_idx_with_start_sym = np.full((batch_size, tgt_seq_len + 1), padding_symbol).astype(np.long)
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
-        tgt_idx[:, 0] = start_symbol
+        tgt_idx_with_start_sym[:, 0] = start_symbol
 
         # src_features shape: batch_size x seq_len x vocab_dim
         # tgt_features shape: batch_size x (seq_len + 1) x vocab_dim
@@ -209,30 +210,16 @@ def data_gen(
             # symbol 0 is used for padding and symbol 1 is used for starting symbol.
             src_idx[i] = np.arange(VOCAB_SIZE)[2:]
             src_idx[i, random_seq_len:] = padding_symbol
-            src_mask[i] = np.tile(src_idx[i] != padding_symbol, (max_seq_len, 1))
+            src_src_mask[i] = np.tile(src_idx[i] != padding_symbol, (max_seq_len, 1))
             src_features[i] = embedding(src_idx[i], vocab_features[i])
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
-            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2+random_seq_len, :-1], axis=-1) * order) + 2
+            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2 + random_seq_len, :-1], axis=-1) * order) + 2
             truth_idx[i] = sort_idx[:tgt_seq_len]
 
-        model.eval()
-        # decode_idx shape: batch_size, tgt_seq_len
-        _, decode_idx = decode(
-            model,
-            torch.from_numpy(user_features).to(device),
-            vocab_features,
-            torch.from_numpy(src_features).to(device),
-            torch.from_numpy(src_mask).to(device),
-            tgt_seq_len,
-            False
-        )
-        tgt_idx[:, 1:1 + tgt_seq_len] = decode_idx
-        model.train()
-
-        for i in range(batch_size):
-            tgt_features[i] = embedding(tgt_idx[i], vocab_features[i])
-            rewards[i] = reward_function(user_features[i], vocab_features[i], tgt_idx[i, 1:], truth_idx[i])
+            tgt_idx_with_start_sym[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
+            tgt_features[i] = embedding(tgt_idx_with_start_sym[i], vocab_features[i])
+            rewards[i] = reward_function(user_features[i], vocab_features[i], tgt_idx_with_start_sym[i, 1:], truth_idx[i])
 
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
@@ -240,11 +227,11 @@ def data_gen(
 
         yield Batch(
             user_features=torch.from_numpy(user_features).to(device),
-            src_mask=torch.from_numpy(src_mask).to(device),
-            tgt_idx=torch.from_numpy(tgt_idx).to(device),
+            src_src_mask=torch.from_numpy(src_src_mask).to(device),
+            tgt_idx_with_start_sym=torch.from_numpy(tgt_idx_with_start_sym).to(device),
             truth_idx=torch.from_numpy(truth_idx).to(device),
             src_features=torch.from_numpy(src_features).to(device),
-            tgt_features=torch.from_numpy(tgt_features).to(device),
+            tgt_features_with_start_sym=torch.from_numpy(tgt_features).to(device),
             rewards=torch.from_numpy(rewards).to(device),
             padding_symbol=padding_symbol,
         )
@@ -254,9 +241,9 @@ def data_gen(
 PADDING_SYMBOL = 0
 START_SYMBOL = 1
 DIM_USER = 4
-VOCAB_DIM = 5
+VOCAB_DIM = 4
 MAX_SEQ_LEN = 3
-TARGET_SEQ_LEN = 3
+TARGET_SEQ_LEN = 2
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 32
@@ -286,6 +273,7 @@ model = make_model(
     num_heads=NUM_HEADS,
     device=device,
 )
+model.register_hook(lambda x: print("w", x))
 baseline = make_baseline(
     baseline_dim_model=BASELINE_DIM_MODEL,
     user_dim=DIM_USER,
@@ -298,8 +286,9 @@ baseline = make_baseline(
 #     warmup=400,
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
-model_opt = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
-baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-3, amsgrad=True)
+# off-policy learning is sensitive to learning rate. lr=1e-3 performs worse
+model_opt = torch.optim.Adam(model.parameters(), lr=1e-4, amsgrad=True)
+baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-4, amsgrad=True)
 
 total_start_time = time.time()
 for epoch in range(EPOCH_NUM):
@@ -307,7 +296,6 @@ for epoch in range(EPOCH_NUM):
     run_epoch(
         epoch,
         data_gen(
-            model=model,
             user_dim=DIM_USER,
             vocab_dim=VOCAB_DIM,
             batch_size=BATCH_SIZE,
@@ -322,13 +310,12 @@ for epoch in range(EPOCH_NUM):
         model,
         baseline,
         LogProbCompute(model.generator),
-        ReinforceLossCompute(on_policy=True, rl_opt=model_opt, baseline_opt=baseline_opt),
+        ReinforceLossCompute(on_policy=False, rl_opt=model_opt, baseline_opt=baseline_opt),
         eval_function,
     )
 
 total_elapse_time = time.time() - total_start_time
 print(f"Total time: {total_elapse_time}")
-
 
 
 model.eval()
