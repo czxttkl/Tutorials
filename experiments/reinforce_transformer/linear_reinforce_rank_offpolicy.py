@@ -7,6 +7,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .linear_reinforce_rank_onpolicy import decode
+from common import START_SYMBOL, PADDING_SYMBOL
 from reinforce_transformer_classes import (
     eval_function_high_reward_prob,
     eval_function_corr,
@@ -15,7 +17,6 @@ from reinforce_transformer_classes import (
     embedding,
     subsequent_mask,
     ReinforceLossCompute,
-    LogProbCompute,
     BaselineNN,
     VocabEmbedder,
     UserEmbedder,
@@ -131,45 +132,6 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
     return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), np.mean(total_eval_res)
 
 
-def decode(
-    model, user_features, vocab_features, src_features, src_mask, tgt_seq_len, greedy
-):
-    batch_size = src_features.shape[0]
-    vocab_size = vocab_features.shape[1]
-    memory = model.encode(user_features, src_features, src_mask)
-    tgt_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
-    decoder_probs = torch.zeros(batch_size, tgt_seq_len, vocab_size)
-    for l in range(tgt_seq_len):
-        tgt_features = torch.tensor(
-            [embedding(tgt_idx[i], vocab_features[i]) for i in range(batch_size)]
-        ).to(device)
-        tgt_src_mask = src_mask[:, :l + 1, :]
-        out = model.decode(
-            memory=memory,
-            user_features=user_features,
-            tgt_src_mask=tgt_src_mask,
-            tgt_features=tgt_features,
-            tgt_tgt_mask=subsequent_mask(tgt_idx.size(1)).type(torch.long).to(device),
-        )
-        # batch_size, vocab_size
-        log_prob = model.generator.decode(out[:, -1, :], tgt_idx.to(device))
-        prob = torch.exp(log_prob)
-        decoder_probs[:, l, :] = prob
-        if greedy:
-            _, next_word = torch.max(prob, dim=1)
-        else:
-            next_word = torch.multinomial(prob, num_samples=1, replacement=False)
-        next_word = next_word.cpu().clone().detach().reshape(batch_size, 1)
-        tgt_idx = torch.cat(
-            [tgt_idx, next_word],
-            dim=1
-        )
-    # remove the starting symbol
-    # shape: batch_size, tgt_seq_len
-    tgt_idx = tgt_idx[:, 1:]
-    return decoder_probs, tgt_idx
-
-
 def data_gen(
     user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
 ):
@@ -238,8 +200,6 @@ def data_gen(
 
 
 # vocab symbol includes padding symbol (0) and sequence starting symbol (1)
-PADDING_SYMBOL = 0
-START_SYMBOL = 1
 DIM_USER = 4
 VOCAB_DIM = 4
 MAX_SEQ_LEN = 3
@@ -252,7 +212,6 @@ NUM_STACKED_LAYERS = 2
 NUM_HEADS = 8
 BATCH_SIZE = 1280
 NUM_TRAIN_BATCHES = 100000
-NUM_EVAL_BATCHES = 5
 
 BASELINE_DIM_MODEL = DIM_FEEDFORWARD
 BASELINE_LAYERS = 2

@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from scipy.stats.stats import pearsonr
 from itertools import combinations
+from common import START_SYMBOL
 
 
 def eval_function_corr(log_probs, rewards):
@@ -104,24 +105,103 @@ class EncoderDecoder(nn.Module):
         self.generator = generator
         self.positional_encoding = positional_encoding
 
-    def forward(self, user_features, src_features, decoder_input_features, src_mask, decoder_input_mask):
-        "Take in and process masked src and target sequences."
+    def forward(self, batch, mode=None, tgt_seq_len=None, greedy=None):
+        if mode == "log_probs":
+            return self._log_probs(
+                batch.user_features,
+                batch.src_features,
+                batch.tgt_features,
+                batch.src_src_mask,
+                batch.tgt_tgt_mask,
+                batch.tgt_idx,
+                batch.label_idx,
+            )
+        elif mode == "decode":
+            assert tgt_seq_len is not None and greedy is not None
+            return self._decode_seq(batch.user_features, batch.src_features, batch.src_src_mask, tgt_seq_len, greedy)
 
+    def _decode_seq(self, user_features, src_features, src_src_mask, tgt_seq_len, greedy):
+        """ Decode sequences based on given inputs """
+        device = src_features.device
+        batch_size, src_seq_len, vocab_dim = src_features.shape
+        # vocab_features is used as look-up table for vocab features.
+        # the second dim is src_seq_len + 2 because we also want to include features of start symbol and padding symbol
+        vocab_features = np.zeros((batch_size, src_seq_len + 2, vocab_dim)).astype(np.float32)
+        vocab_features[:, 2:, :] = src_features.numpy()
+        vocab_size = vocab_features.shape[1]
+
+        tgt_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
+        decoder_probs = torch.zeros(batch_size, tgt_seq_len, vocab_size)
+
+        memory = self.encode(user_features, src_features, src_src_mask)
+
+        for l in range(tgt_seq_len):
+            tgt_features = torch.tensor(
+                [embedding(tgt_idx[i], vocab_features[i]) for i in range(batch_size)]
+            ).to(device)
+            tgt_src_mask = src_src_mask[:, :l + 1, :]
+            out = self.decode(
+                memory=memory,
+                user_features=user_features,
+                tgt_src_mask=tgt_src_mask,
+                tgt_features=tgt_features,
+                tgt_tgt_mask=subsequent_mask(tgt_idx.size(1)).type(torch.long).to(device),
+            )
+            # next word shape: batch_size, 1
+            # prob shape: batch_size, vocab_size
+            next_word, prob = self.generator.decode(out[:, -1, :], tgt_idx.to(device), greedy)
+            decoder_probs[:, l, :] = prob
+            tgt_idx = torch.cat(
+                [tgt_idx, next_word.cpu()],
+                dim=1
+            )
+        # remove the starting symbol
+        # shape: batch_size, tgt_seq_len
+        tgt_idx = tgt_idx[:, 1:]
+        return decoder_probs, tgt_idx
+
+    def _log_probs(self, user_features, src_features, tgt_features, src_src_mask, tgt_tgt_mask, tgt_idx, label_idx):
+        """
+        Compute log of generative probabilities of given tgt sequences (used for REINFORCE training)
+        """
         # encoder_output shape: batch_size, seq_len + 1, dim_model
-        encoder_output = self.encode(user_features, src_features, src_mask)
+        encoder_output = self.encode(user_features, src_features, src_src_mask)
 
-        tgt_seq_len = decoder_input_features.shape[1]
+        tgt_seq_len = tgt_features.shape[1]
         src_seq_len = src_features.shape[1]
         assert tgt_seq_len <= src_seq_len
 
         # tgt_src_mask shape: batch_size, seq_len, seq_len
-        tgt_src_mask = src_mask[:, :tgt_seq_len, :]
+        tgt_src_mask = src_src_mask[:, :tgt_seq_len, :]
 
         # decoder_output shape: batch_size, seq_len, dim_model
         decoder_output = self.decode(
-            encoder_output, user_features, tgt_src_mask, decoder_input_features, decoder_input_mask
+            encoder_output, user_features, tgt_src_mask, tgt_features, tgt_tgt_mask
         )
-        return decoder_output
+        # log_probs shape: batch_size
+        log_probs = self._output_to_log_prob(decoder_output, tgt_idx, label_idx)
+
+        return log_probs
+
+    def _output_to_log_prob(self, decoder_output, tgt_idx, label_idx):
+        # decoder_output: the output from the decoder. Shape: batch_size, seq_len, dim_model
+        # tgt_idx: input idx to the decoder, the first symbol is always the starting symbol
+        # tgt_idx shape: batch_size, seq_len
+        # label_idx: output idx of the decoder, shape: batch_size, seq_len
+
+        # log probs: log probability distribution of each symbol
+        # shape: batch_size, seq_len, vocab_size
+        raw_log_probs = self.generator(decoder_output, tgt_idx)
+        batch_size, seq_len, vocab_size = raw_log_probs.shape
+
+        # log_probs: each symbol of the label sequence's generative log probability
+        # shape: batch_size, seq_len
+        log_probs = raw_log_probs.view(-1, vocab_size)[
+            np.arange(batch_size * seq_len), label_idx.flatten()
+        ].view(batch_size, seq_len)
+
+        # shape: batch_size
+        return log_probs.sum(dim=1)
 
     def encode(self, user_features, src_features, src_mask):
         # user_features: batch_size, dim_user
@@ -164,7 +244,8 @@ class EncoderDecoder(nn.Module):
             torch.cat((user_embed, decoder_input_embed), dim=-1)
         )
 
-        # return shape: batch_size, seq_len, dim_model
+        # output of decoder will be later transformed into probabilities over symbols.
+        # shape: batch_size, seq_len, dim_model
         return self.decoder(decoder_input_embed, memory, tgt_src_mask, tgt_tgt_mask)
 
 
@@ -191,9 +272,9 @@ class Generator(nn.Module):
         self.dim_model = dim_model
         self.proj = nn.Linear(dim_model, vocab_size)
 
-    def forward(self, x, decoder_input_idx):
+    def forward(self, x, tgt_idx):
         # generator receives the attention x from the decoder. Shape: batch_size, seq_len, dim_model
-        # decoder_input_idx: input to the decoder, the first symbol is always the starting symbol
+        # tgt_idx: input to the decoder, the first symbol is always the starting symbol
         # Shape: batch_size, seq_len
 
         # logits: the probability distribution of each symbol
@@ -202,31 +283,44 @@ class Generator(nn.Module):
         # the first two symbols are reserved for padding and decoder-starting symbols
         # so they should never be a possible output label
         logits[:, :, :2] = float("-inf")
-        batch_size, seq_len = decoder_input_idx.shape
-        mask_indices = torch.tril(decoder_input_idx.repeat(1, seq_len).reshape(batch_size, seq_len, seq_len), diagonal=0)
+        batch_size, seq_len = tgt_idx.shape
+        mask_indices = torch.tril(tgt_idx.repeat(1, seq_len).reshape(batch_size, seq_len, seq_len), diagonal=0)
         logits.scatter_(2, mask_indices, float("-inf"))
         # log_probs shape: batch_size, seq_len, vocab_size
         log_probs = F.log_softmax(logits, dim=-1)
         return log_probs
 
-    def decode(self, x, y_decoder):
+    def decode(self, x, tgt_idx, greedy):
+        # decode one-step
         # x is the attention of the latest step from the decoder. Shape: batch_size, dim_model
-        # y_decoder: input to the decoder, the first symbol is always the starting symbol
+        # tgt_idx: input to the decoder, the first symbol is always the starting symbol
         # Shape: batch_size, seq_len
-        # the first two symbols are reserved for padding and decoder-starting symbols so
-        # they should never be a possible output label
+        # greedy: whether to greedily pick or sample the next symbol
         assert len(x.shape) == 2 and x.shape[1] == self.dim_model
+        batch_size = x.shape[0]
         logits = self.proj(x)
         # invalidate the padding symbol and decoder-starting symbol
         logits[:, :2] = float("-inf")
-        logits.scatter_(1, y_decoder, float("-inf"))
-        return F.log_softmax(logits, dim=-1)
+        # invalidate symbols already appeared in decoded sequences
+        logits.scatter_(1, tgt_idx, float("-inf"))
+        prob = F.softmax(logits, dim=-1)
+        if greedy:
+            _, next_word = torch.max(prob, dim=1)
+        else:
+            next_word = torch.multinomial(prob, num_samples=1, replacement=False)
+        next_word = next_word.reshape(batch_size, 1)
+
+        # next_word: the decoded symbols for the latest step
+        # shape: batch_size x 1
+        # prob: generative probabilities of the latest step
+        # shape: batch_size x vocab_size
+        return next_word, prob
+
 
 
 class SublayerConnection(nn.Module):
     """
     A residual connection followed by a layer norm.
-    Note for code simplicity the norm is first as opposed to last.
     """
 
     def __init__(self, dim_model):
@@ -234,7 +328,6 @@ class SublayerConnection(nn.Module):
         self.norm = LayerNorm(dim_model)
 
     def forward(self, x, sublayer):
-        "Apply residual connection to any sublayer with the same size."
         return x + sublayer(self.norm(x))
 
 
@@ -464,20 +557,26 @@ class Batch:
         self.rewards = rewards
         self.truth_idx = truth_idx
 
-        # igt_idx shape: batch_size, tgt_seq_len
-        self.tgt_idx = tgt_idx_with_start_sym[:, :-1]
-        # label_idx shape: batch_size, tgt_seq_len
-        self.label_idx = tgt_idx_with_start_sym[:, 1:]
-        # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
-        self.tgt_tgt_mask = self.make_std_mask(self.tgt_idx, padding_symbol)
-        # ntoken shape: batch_size * seq_len
-        self.ntokens = (self.label_idx != padding_symbol).data.sum()
+        if tgt_idx_with_start_sym is not None:
+            # igt_idx shape: batch_size, tgt_seq_len
+            self.tgt_idx = tgt_idx_with_start_sym[:, :-1]
+            # label_idx shape: batch_size, tgt_seq_len
+            self.label_idx = tgt_idx_with_start_sym[:, 1:]
+            # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
+            self.tgt_tgt_mask = self.make_std_mask(self.tgt_idx, padding_symbol)
+            # tgt_features shape: batch_size x seq_len x vocab_dim
+            self.tgt_features = tgt_features_with_start_sym[:, :-1, :]
+            # ntoken shape: batch_size * seq_len
+            self.ntokens = (self.label_idx != padding_symbol).data.sum()
+        else:
+            self.tgt_idx = None
+            self.label_idx = None
+            self.tgt_tgt_mask = None
+            self.tgt_features = None
+            self.ntokens = None
 
         # src_features shape: batch_size x seq_len x vocab_dim
         self.src_features = src_features
-        # tgt_features shape: batch_size x seq_len x vocab_dim
-        self.tgt_features = tgt_features_with_start_sym[:, :-1, :]
-
 
     @staticmethod
     def make_std_mask(tgt, pad):
@@ -505,33 +604,6 @@ class Batch:
 # pred = torch.tensor([[0, 0.7, 0.1, 0.1, 0.1]], dtype=torch.float32)
 # label = torch.tensor([1], dtype=torch.long)
 # print(crit(pred, label), crit.true_dist)
-
-
-class LogProbCompute:
-    """ Compute each sequence's generative log probability """
-
-    def __init__(self, generator):
-        self.generator = generator
-
-    def __call__(self, x, decoder_input_idx, label_idx):
-        # x: the attention x from the decoder. Shape: batch_size, seq_len, dim_model
-        # decoder_input_idx: input to the decoder, the first symbol is always the starting symbol
-        # decoder_input_idx shape: batch_size, seq_len
-        # label_idx shape: batch_size, seq_len
-
-        # log probs: log probability distribution of each symbol
-        # shape: batch_size, seq_len, vocab_size
-        raw_log_probs = self.generator(x, decoder_input_idx)
-        batch_size, seq_len, vocab_size = raw_log_probs.shape
-
-        # log_probs: each symbol of the label sequence's generative log probability
-        # shape: batch_size, seq_len
-        log_probs = raw_log_probs.view(-1, vocab_size)[
-            np.arange(batch_size * seq_len), label_idx.flatten()
-        ].view(batch_size, seq_len)
-
-        # shape: batch_size
-        return log_probs.sum(dim=1)
 
 
 class BaselineNN(nn.Module):
