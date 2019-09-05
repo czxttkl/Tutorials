@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .linear_reinforce_rank_onpolicy import decode
+from linear_reinforce_rank_onpolicy import decode
 from common import START_SYMBOL, PADDING_SYMBOL
 from reinforce_transformer_classes import (
     eval_function_high_reward_prob,
@@ -75,7 +75,7 @@ def make_model(
     return model
 
 
-def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute, eval_function):
+def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
     "Standard Training and Logging Function"
     start = time.time()
     total_rl_loss = 0.
@@ -84,16 +84,11 @@ def run_epoch(epoch, data_iter, model, baseline, log_prob_compute, loss_compute,
     tmp_tokens = 0
 
     for i, batch in enumerate(data_iter):
-        # out shape: batch_size, seq_len, dim_model
-        out = model.forward(
-            batch.user_features,
-            batch.src_features,
-            batch.tgt_features,
-            batch.src_src_mask,
-            batch.tgt_tgt_mask
-        )
         # log_probs shape: batch_size
-        log_probs = log_prob_compute(out, batch.tgt_idx, batch.label_idx)
+        log_probs = model(
+            batch,
+            mode="log_probs",
+        )
         rl_loss, baseline_loss = loss_compute(log_probs, batch.rewards, baseline, batch.user_features)
         eval_res = eval_function(log_probs.cpu().detach().numpy(), batch.rewards.cpu().detach().numpy())
 
@@ -154,7 +149,7 @@ def data_gen(
         src_idx = np.full((batch_size, max_seq_len), padding_symbol).astype(np.long)
         # src_src_mask shape: batch_size x seq_len x seq_len
         src_src_mask = np.ones((batch_size, max_seq_len, max_seq_len)).astype(np.int8)
-        # tgt_idx shape: batch_size x (seq_len + 1)
+        # tgt_idx_with_start_sym shape: batch_size x (seq_len + 1)
         tgt_idx_with_start_sym = np.full((batch_size, tgt_seq_len + 1), padding_symbol).astype(np.long)
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
@@ -176,7 +171,7 @@ def data_gen(
             src_features[i] = embedding(src_idx[i], vocab_features[i])
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
-            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2 + random_seq_len, :-1], axis=-1) * order) + 2
+            sort_idx = np.argsort(np.sum(vocab_features[i, 2:2+random_seq_len, :-1], axis=-1) * order) + 2
             truth_idx[i] = sort_idx[:tgt_seq_len]
 
             tgt_idx_with_start_sym[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
@@ -199,7 +194,6 @@ def data_gen(
         )
 
 
-# vocab symbol includes padding symbol (0) and sequence starting symbol (1)
 DIM_USER = 4
 VOCAB_DIM = 4
 MAX_SEQ_LEN = 3
@@ -232,7 +226,6 @@ model = make_model(
     num_heads=NUM_HEADS,
     device=device,
 )
-model.register_hook(lambda x: print("w", x))
 baseline = make_baseline(
     baseline_dim_model=BASELINE_DIM_MODEL,
     user_dim=DIM_USER,
@@ -268,7 +261,6 @@ for epoch in range(EPOCH_NUM):
         ),
         model,
         baseline,
-        LogProbCompute(model.generator),
         ReinforceLossCompute(on_policy=False, rl_opt=model_opt, baseline_opt=baseline_opt),
         eval_function,
     )
@@ -289,10 +281,10 @@ for i in range(test_batch_size):
 
 user_features = torch.from_numpy(user_features).to(device)
 src_features = torch.from_numpy(vocab_features[:, 2:, :]).to(device)
-src_mask = torch.from_numpy(
+src_src_mask = torch.from_numpy(
     np.ones((test_batch_size, MAX_SEQ_LEN, MAX_SEQ_LEN))
 ).to(device)
-decoder_probs, output_tgt = decode(model, user_features, vocab_features, src_features, src_mask, TARGET_SEQ_LEN, greedy=True)
+decoder_probs, output_tgt = decode(model, user_features, vocab_features, src_features, src_src_mask, TARGET_SEQ_LEN, greedy=True)
 print(f"output seq:\n{output_tgt}")
 print(f"decoder probs:\n{decoder_probs}")
 

@@ -90,7 +90,7 @@ class EncoderDecoder(nn.Module):
     def encode(self, user_features, src_features, src_mask):
         # user_features: batch_size, dim_user
         # src_features: batch_size, seq_len, dim_vocab
-        # src_mask shape: batch_size, seq_len + 1, seq_len + 1
+        # src_src_mask shape: batch_size, seq_len + 1, seq_len + 1
         batch_size, seq_len, _ = src_features.shape
 
         # vocab_embed: batch_size, seq_len, dim_model/2
@@ -212,7 +212,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, src_embed, src_mask):
         # src_embed shape: batch_size, seq_len, dim_model
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
 
         def self_attn_layer(x):
             return self.self_attn(x, x, x, src_mask)
@@ -412,7 +412,7 @@ class Batch:
 
     def __init__(self, user_features, src_mask, trg_idx, src_features, tgt_features, padding_symbol):
         # user_features shape: batch_size, user_dim
-        # src_mask shape: batch_size, seq_len + 1, seq_len + 1
+        # src_src_mask shape: batch_size, seq_len + 1, seq_len + 1
         # tgt_idx shape: batch_size, seq_len + 1
         # src_embed shape: batch_size, seq_len, vocab_dim
         # tgt_embed shape: batch_size, seq_len + 1, vocab_dim

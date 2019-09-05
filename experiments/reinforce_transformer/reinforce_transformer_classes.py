@@ -206,7 +206,7 @@ class EncoderDecoder(nn.Module):
     def encode(self, user_features, src_features, src_mask):
         # user_features: batch_size, dim_user
         # src_features: batch_size, seq_len, dim_vocab
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
         batch_size, seq_len, _ = src_features.shape
 
         # vocab_embed: batch_size, seq_len, dim_model/2
@@ -273,7 +273,7 @@ class Generator(nn.Module):
         self.proj = nn.Linear(dim_model, vocab_size)
 
     def forward(self, x, tgt_idx):
-        # generator receives the attention x from the decoder. Shape: batch_size, seq_len, dim_model
+        # generator receives the output x from the decoder. Shape: batch_size, seq_len, dim_model
         # tgt_idx: input to the decoder, the first symbol is always the starting symbol
         # Shape: batch_size, seq_len
 
@@ -343,7 +343,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, src_embed, src_mask):
         # src_embed shape: batch_size, seq_len, dim_model
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
 
         def self_attn_layer(x):
             return self.self_attn(x, x, x, src_mask)

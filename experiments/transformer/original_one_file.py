@@ -74,7 +74,7 @@ class EncoderDecoder(nn.Module):
 
     def encode(self, src, src_mask):
         # src shape: batch_size, seq_len
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
         # src_embed: batch_size, seq_len, dim_model
         src_embed = self.src_embed(src)
         return self.encoder(src_embed, src_mask)
@@ -83,7 +83,7 @@ class EncoderDecoder(nn.Module):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
 
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
         # tgt shape: batch_size, seq_len
         # tgt_mask shape: batch_size, seq_len, seq_len
         # tgt_embed shape: batch_size, seq_len, dim_model
@@ -145,7 +145,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, src_embed, src_mask):
         # src_embed shape: batch_size, seq_len, dim_model
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
 
         def self_attn_layer(x):
             return self.self_attn(x, x, x, src_mask)
@@ -186,7 +186,7 @@ class DecoderLayer(nn.Module):
         # x is usually target embedding or the output of previous decoder layer
         # memory shape: batch_size, seq_len, dim_model
         # memory is usually the output of the last encoder layer
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
         # tgt_mask shape: batch_size, seq_len, seq_len
         m = memory
 
@@ -364,7 +364,7 @@ class Batch:
     def __init__(self, src, trg=None, pad=0):
         # src shape: batch_size, seq_len
         # tgt shape: batch_size, seq_len + 1
-        # src_mask shape: batch_size, seq_len, seq_len
+        # src_src_mask shape: batch_size, seq_len, seq_len
         batch_size, seq_len = src.shape
         self.src = src
         self.src_mask = (src != pad).repeat(1, seq_len).view(batch_size, seq_len, seq_len)
