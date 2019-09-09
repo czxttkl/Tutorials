@@ -5,24 +5,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from scipy.stats.stats import pearsonr
+import scipy.stats as stats
 from itertools import combinations
 from common import START_SYMBOL
 
 
-def eval_function_corr(log_probs, rewards):
-    r, p_value = pearsonr(rewards, log_probs)
-    return r
-
-
 def eval_function_high_reward_prob(log_probs, rewards):
     highest_possible_reward = np.max(rewards)
-    return np.mean(log_probs[rewards == highest_possible_reward])
-
-
-def reward_function_f1(user_feature, vocab_feature, tgt_idx, truth_idx):
-    # return np.sum(tgt_idx == truth_idx)
-    return np.sum(tgt_idx != truth_idx)
+    # what's the log prob of sequences whose rewards are the highest
+    eval1 = np.mean(log_probs[rewards == highest_possible_reward])
+    # kendall tau test. High rewards should correlate to high log probs
+    eval2 = stats.kendalltau(log_probs, rewards).correlation
+    return round(eval1, 5), round(eval2, 5)
 
 
 def reward_function_pairwise(user_feature, vocab_feature, tgt_idx, truth_idx):

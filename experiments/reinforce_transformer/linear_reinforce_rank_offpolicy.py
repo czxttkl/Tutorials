@@ -11,8 +11,6 @@ import torch.nn.functional as F
 from common import START_SYMBOL, PADDING_SYMBOL
 from reinforce_transformer_classes import (
     eval_function_high_reward_prob,
-    eval_function_corr,
-    reward_function_f1,
     reward_function_pairwise,
     embedding,
     subsequent_mask,
@@ -104,8 +102,7 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
             elapsed = time.time() - start
             total_elapsed = time.time() - total_start_time
             print(
-                "Epoch %d, Step: %d, RL Loss: %f, Bsl Loss: %f, Eval Res: %f, Tokens per Sec: %d, Elapse: %.3f, %.3f"
-                % (
+                "Epoch {}, Step: {}, RL Loss: {:.5f}, Bsl Loss: {:.5f}, Eval Res: {}, Tokens per Sec: {:.1f}, Elapse: {:.3f}, {:.3f}".format(
                     epoch,
                     i,
                     avg_rl_loss,
@@ -119,12 +116,12 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
             start = time.time()
             tmp_tokens = 0
 
-        # off-policy learning is not stable. So once eval_res is below -0.1, it is a good sign of
-        # successful learning
-        if eval_res > -0.1:
+        # off-policy learning is not stable. So once eval_res[0] (log prob of sequences whose rewards are the highest)
+        #  is below -0.1, it is a good sign of successful learning
+        if eval_res[0] > -0.1:
             break
 
-    return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), np.mean(total_eval_res)
+    return total_rl_loss / (i + 1), total_baseline_loss / (i + 1)
 
 
 def decode(
