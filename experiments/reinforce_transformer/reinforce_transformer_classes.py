@@ -16,17 +16,8 @@ def eval_function_corr(log_probs, rewards):
 
 
 def eval_function_high_reward_prob(log_probs, rewards):
-    # print("rewards", rewards[:10])
-    # print(
-    #     "reward=0", np.mean(log_probs[rewards == 0]),
-    #     "reward=1", np.mean(log_probs[rewards == 1]),
-    #     "reward=2", np.mean(log_probs[rewards == 2]),
-    #     "reward=3", np.mean(log_probs[rewards == 3]),
-    #     "reward=4", np.mean(log_probs[rewards == 4]),
-    #     "reward=5", np.mean(log_probs[rewards == 5]),
-    #     "reward=6", np.mean(log_probs[rewards == 6]),
-    # )
-    return np.mean(log_probs[rewards == 0])
+    highest_possible_reward = np.max(rewards)
+    return np.mean(log_probs[rewards == highest_possible_reward])
 
 
 def reward_function_f1(user_feature, vocab_feature, tgt_idx, truth_idx):
@@ -37,41 +28,50 @@ def reward_function_f1(user_feature, vocab_feature, tgt_idx, truth_idx):
 def reward_function_pairwise(user_feature, vocab_feature, tgt_idx, truth_idx):
     # return np.sum(tgt_idx == truth_idx)
     if len(tgt_idx) == 1:
-        return float(tgt_idx[0] != truth_idx[0])
+        return float(tgt_idx[0] == truth_idx[0])
     truth_pairs = set(combinations(truth_idx, 2))
     tgt_pairs = set(combinations(tgt_idx, 2))
-    return float(len(truth_pairs - tgt_pairs))
+    return float(len(truth_pairs & tgt_pairs))
 
 
 def embedding(idx, table):
+    """ numpy version of embedding look up """
     new_shape = (*idx.shape, -1)
     return table[idx.flatten()].reshape(new_shape)
 
 
 def subsequent_mask(size):
-    "Mask out subsequent positions."
+    """
+    Mask out subsequent positions. Mainly used in the decoding process,
+    in which an item should not attend subsequent items.
+    """
     attn_shape = (1, size, size)
     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype("uint8")
     return torch.from_numpy(subsequent_mask) == 0
 
 
 def clones(module, N):
-    "Produce N identical layers."
+    """
+    Produce N identical layers.
+
+    :param module: nn.Module class
+    :param N: number of copies
+    """
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 
-def attention(query, key, value, mask=None):
-    "Compute 'Scaled Dot Product Attention'"
-    d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
-    if mask is not None:
-        scores = scores.masked_fill(mask == 0, -1e9)
-    p_attn = F.softmax(scores, dim=-1)
-    attn = torch.matmul(p_attn, value)
-    # scores shape: batch_size x num_heads x seq_len x seq_len
-    # p_attn shape: batch_size x num_heads x seq_len x seq_len
-    # attn shape: batch_size x num_heads x seq_len x d_k
+def attention(query, key, value, mask):
+    """ Scaled Dot Product Attention """
     # mask shape: batch_size x 1 x seq_len x seq_len
+
+    d_k = query.size(-1)
+    # scores shape: batch_size x num_heads x seq_len x seq_len
+    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+    scores = scores.masked_fill(mask == 0, -1e9)
+    # p_attn shape: batch_size x num_heads x seq_len x seq_len
+    p_attn = F.softmax(scores, dim=-1)
+    # attn shape: batch_size x num_heads x seq_len x d_k
+    attn = torch.matmul(p_attn, value)
     return attn, p_attn
 
 
@@ -92,8 +92,7 @@ class LayerNorm(nn.Module):
 
 class EncoderDecoder(nn.Module):
     """
-    A standard Encoder-Decoder architecture. Base for this and many
-    other models.
+    Encoder-Decoder architecture
     """
 
     def __init__(self, encoder, decoder, vocab_embedder, user_embedder, generator, positional_encoding):
@@ -149,12 +148,17 @@ class EncoderDecoder(nn.Module):
             )
             # next word shape: batch_size, 1
             # prob shape: batch_size, vocab_size
-            next_word, prob = self.generator.decode(out[:, -1, :], tgt_idx.to(device), greedy)
+            next_word, prob = self.generator(
+                mode="decode_one_step",
+                decoder_output=out,
+                tgt_idx=tgt_idx,
+                greedy=greedy
+            )
             decoder_probs[:, l, :] = prob
             tgt_idx = torch.cat(
                 [tgt_idx, next_word.cpu()],
-                dim=1
-            )
+                dim=1,
+            ).to(device)
         # remove the starting symbol
         # shape: batch_size, tgt_seq_len
         tgt_idx = tgt_idx[:, 1:]
@@ -191,7 +195,7 @@ class EncoderDecoder(nn.Module):
 
         # log probs: log probability distribution of each symbol
         # shape: batch_size, seq_len, vocab_size
-        raw_log_probs = self.generator(decoder_output, tgt_idx)
+        raw_log_probs = self.generator(mode="log_probs", decoder_output=decoder_output, tgt_idx=tgt_idx)
         batch_size, seq_len, vocab_size = raw_log_probs.shape
 
         # log_probs: each symbol of the label sequence's generative log probability
@@ -272,8 +276,15 @@ class Generator(nn.Module):
         self.dim_model = dim_model
         self.proj = nn.Linear(dim_model, vocab_size)
 
-    def forward(self, x, tgt_idx):
-        # generator receives the output x from the decoder. Shape: batch_size, seq_len, dim_model
+    def forward(self, mode, decoder_output=None, tgt_idx=None, greedy=None):
+        if mode == "log_probs":
+            return self._log_probs(decoder_output, tgt_idx)
+        elif mode == "decode_one_step":
+            assert greedy is not None
+            return self._decode_one_step(decoder_output, tgt_idx, greedy)
+
+    def _log_probs(self, x, tgt_idx):
+        # x: the output of decoder. Shape: batch_size, seq_len, dim_model
         # tgt_idx: input to the decoder, the first symbol is always the starting symbol
         # Shape: batch_size, seq_len
 
@@ -290,15 +301,18 @@ class Generator(nn.Module):
         log_probs = F.log_softmax(logits, dim=-1)
         return log_probs
 
-    def decode(self, x, tgt_idx, greedy):
+    def _decode_one_step(self, x, tgt_idx, greedy):
         # decode one-step
-        # x is the attention of the latest step from the decoder. Shape: batch_size, dim_model
+        # x: the output ofthe decoder. Shape: batch_size, seq_len, dim_model
         # tgt_idx: input to the decoder, the first symbol is always the starting symbol
         # Shape: batch_size, seq_len
         # greedy: whether to greedily pick or sample the next symbol
-        assert len(x.shape) == 2 and x.shape[1] == self.dim_model
+
+        # get the last step of decoder output
+        last_step_x = x[:, -1, :]
+
         batch_size = x.shape[0]
-        logits = self.proj(x)
+        logits = self.proj(last_step_x)
         # invalidate the padding symbol and decoder-starting symbol
         logits[:, :2] = float("-inf")
         # invalidate symbols already appeared in decoded sequences
@@ -315,7 +329,6 @@ class Generator(nn.Module):
         # prob: generative probabilities of the latest step
         # shape: batch_size x vocab_size
         return next_word, prob
-
 
 
 class SublayerConnection(nn.Module):
@@ -433,7 +446,7 @@ class MultiHeadedAttention(nn.Module):
 
         # 2) Apply attention on all the projected vectors in batch.
         # x shape: batch_size, num_heads, seq_len, d_k
-        x, self.attn = attention(query, key, value, mask=mask)
+        x, self.attn = attention(query, key, value, mask)
 
         # 3) "Concat" using a view and apply a final linear.
         # each attention's output is d_k dimension. Concat num_heads attention's outputs
@@ -542,7 +555,16 @@ class Batch:
     "Object for holding a batch of data with mask during training."
 
     def __init__(
-        self, user_features, src_src_mask, tgt_idx_with_start_sym, truth_idx, src_features, tgt_features_with_start_sym, rewards, padding_symbol
+        self,
+        user_features,
+        src_src_mask,
+        tgt_idx_with_start_sym,
+        truth_idx,
+        src_features,
+        tgt_features_with_start_sym,
+        rewards,
+        tgt_probs,
+        padding_symbol,
     ):
         # user_features shape: batch_size, user_dim
         # src_src_mask shape: batch_size, seq_len, seq_len
@@ -551,10 +573,12 @@ class Batch:
         # src_features shape: batch_size, seq_len, vocab_dim
         # tgt_features_with_start_sym shape: batch_size, tgt_seq_len + 1, vocab_dim (including the feature of starting symbol)
         # rewards shape: batch_size
+        # tgt_probs shape: batch_size
 
         self.src_src_mask = src_src_mask
         self.user_features = user_features
         self.rewards = rewards
+        self.tgt_probs = tgt_probs
         self.truth_idx = truth_idx
 
         if tgt_idx_with_start_sym is not None:
@@ -631,7 +655,7 @@ class ReinforceLossCompute:
         self.rl_opt = rl_opt
         self.baseline_opt = baseline_opt
 
-    def __call__(self, log_probs, reward, baseline, user_features):
+    def __call__(self, log_probs, reward, baseline, user_features, tgt_probs):
         # log_probs: the generative probability of each sequence
         # Shape: batch_size
         # reward: reward associated with each sequence
@@ -639,31 +663,9 @@ class ReinforceLossCompute:
         # baseline: the baseline model
         # user_features: the user feature associated with each sequence. Used to compute baseline
         # shape: batch_size x user_dim
+        # tgt_probs: tgt sequence probs, used for off policy learning
+        # shape: batch_size
         batch_size = log_probs.shape[0]
-
-        with torch.no_grad():
-            baseline.eval()
-            b = baseline(user_features).squeeze()
-            baseline.train()
-
-        assert b.shape == reward.shape == log_probs.shape
-        assert not b.requires_grad
-        assert not reward.requires_grad
-        assert log_probs.requires_grad
-
-        # importance sampling
-        probs = torch.exp(log_probs.detach()) if not self.on_policy else 1
-        # add negative sign because we take gradient descent but we want to maximize rewards
-        # rl_loss = - 1. / batch_size * torch.sum(log_probs * (reward - b))
-        batch_loss = probs * log_probs * (reward - b)
-        # print("\nbatch_loss", batch_loss[:10], torch.max(batch_loss), torch.sum(batch_loss))
-        # print("probs", probs[:10])
-        # print("baseline", b[:10])
-        rl_loss = 1. / batch_size * torch.sum(batch_loss)
-        rl_loss.backward()
-        if self.rl_opt:
-            self.rl_opt.step()
-            self.rl_opt.zero_grad()
 
         b = baseline(user_features).squeeze()
         assert b.requires_grad
@@ -672,6 +674,27 @@ class ReinforceLossCompute:
         if self.baseline_opt:
             self.baseline_opt.step()
             self.baseline_opt.zero_grad()
+
+        b = b.detach()
+
+        assert b.shape == reward.shape == log_probs.shape
+        assert not b.requires_grad
+        assert not reward.requires_grad
+        assert log_probs.requires_grad
+
+        # importance sampling
+        if not self.on_policy:
+            probs = torch.exp(log_probs.detach()) / tgt_probs
+        else:
+            probs = 1
+        # add negative sign because we take gradient descent but we want to maximize rewards
+        # rl_loss = - 1. / batch_size * torch.sum(log_probs * (reward - b))
+        batch_loss = -probs * log_probs * (reward - b)
+        rl_loss = 1. / batch_size * torch.sum(batch_loss)
+        rl_loss.backward()
+        if self.rl_opt:
+            self.rl_opt.step()
+            self.rl_opt.zero_grad()
 
         return rl_loss.cpu().detach().numpy(), baseline_loss.cpu().detach().numpy()
 

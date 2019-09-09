@@ -6,8 +6,8 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+from functools import reduce
 import torch.nn.functional as F
-from linear_reinforce_rank_onpolicy import decode
 from common import START_SYMBOL, PADDING_SYMBOL
 from reinforce_transformer_classes import (
     eval_function_high_reward_prob,
@@ -89,7 +89,7 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
             batch,
             mode="log_probs",
         )
-        rl_loss, baseline_loss = loss_compute(log_probs, batch.rewards, baseline, batch.user_features)
+        rl_loss, baseline_loss = loss_compute(log_probs, batch.rewards, baseline, batch.user_features, batch.tgt_probs)
         eval_res = eval_function(log_probs.cpu().detach().numpy(), batch.rewards.cpu().detach().numpy())
 
         ntokens = batch.ntokens.cpu().numpy()
@@ -127,6 +127,24 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
     return total_rl_loss / (i + 1), total_baseline_loss / (i + 1), np.mean(total_eval_res)
 
 
+def decode(
+    model, user_features, vocab_features, src_features, src_src_mask, tgt_seq_len, greedy
+):
+    batch = Batch(
+        user_features=user_features,
+        src_src_mask=src_src_mask,
+        tgt_idx_with_start_sym=None,
+        truth_idx=None,
+        src_features=src_features,
+        tgt_features_with_start_sym=None,
+        rewards=None,
+        tgt_probs=None,
+        padding_symbol=PADDING_SYMBOL,
+    )
+    decoder_probs, tgt_idx = model(batch, mode="decode", tgt_seq_len=tgt_seq_len, greedy=greedy)
+    return decoder_probs, tgt_idx
+
+
 def data_gen(
     user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
 ):
@@ -141,6 +159,8 @@ def data_gen(
         # the last dim is the sum of all other dims
         vocab_features[:, :, -1] = np.sum(vocab_features[:, :, :-1], axis=-1)
 
+        # tgt sequence probabilities, used for off-policy importance sampling correciton
+        tgt_probs = np.zeros(batch_size).astype(np.float32)
         # rewards shape: batch_size
         rewards = np.zeros(batch_size).astype(np.float32)
         # truth_idx shape: batch_size
@@ -177,6 +197,7 @@ def data_gen(
             tgt_idx_with_start_sym[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
             tgt_features[i] = embedding(tgt_idx_with_start_sym[i], vocab_features[i])
             rewards[i] = reward_function(user_features[i], vocab_features[i], tgt_idx_with_start_sym[i, 1:], truth_idx[i])
+            tgt_probs[i] = reduce(lambda a, b: 1./(a*b), range(random_seq_len, random_seq_len-tgt_seq_len, -1))
 
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
@@ -190,14 +211,15 @@ def data_gen(
             src_features=torch.from_numpy(src_features).to(device),
             tgt_features_with_start_sym=torch.from_numpy(tgt_features).to(device),
             rewards=torch.from_numpy(rewards).to(device),
+            tgt_probs=torch.from_numpy(tgt_probs).to(device),
             padding_symbol=padding_symbol,
         )
 
 
 DIM_USER = 4
-VOCAB_DIM = 4
+VOCAB_DIM = 5
 MAX_SEQ_LEN = 3
-TARGET_SEQ_LEN = 2
+TARGET_SEQ_LEN = 3
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 32
@@ -238,9 +260,8 @@ baseline = make_baseline(
 #     warmup=400,
 #     optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9),
 # )
-# off-policy learning is sensitive to learning rate. lr=1e-3 performs worse
-model_opt = torch.optim.Adam(model.parameters(), lr=1e-4, amsgrad=True)
-baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-4, amsgrad=True)
+model_opt = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True)
+baseline_opt = torch.optim.Adam(baseline.parameters(), lr=1e-3, amsgrad=True)
 
 total_start_time = time.time()
 for epoch in range(EPOCH_NUM):

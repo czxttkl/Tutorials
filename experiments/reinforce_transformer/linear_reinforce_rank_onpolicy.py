@@ -88,7 +88,7 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
             batch,
             mode="log_probs",
         )
-        rl_loss, baseline_loss = loss_compute(log_probs, batch.rewards, baseline, batch.user_features)
+        rl_loss, baseline_loss = loss_compute(log_probs, batch.rewards, baseline, batch.user_features, batch.tgt_probs)
         eval_res = eval_function(log_probs.cpu().detach().numpy(), batch.rewards.cpu().detach().numpy())
 
         ntokens = batch.ntokens.cpu().numpy()
@@ -136,6 +136,7 @@ def decode(
         src_features=src_features,
         tgt_features_with_start_sym=None,
         rewards=None,
+        tgt_probs=None,
         padding_symbol=PADDING_SYMBOL,
     )
     decoder_probs, tgt_idx = model(batch, mode="decode", tgt_seq_len=tgt_seq_len, greedy=greedy)
@@ -190,8 +191,9 @@ def data_gen(
             truth_idx[i] = sort_idx[:tgt_seq_len]
 
         model.eval()
+        # decode_probs shape: batch_size, tgt_seq_len, vocab_size
         # decode_idx shape: batch_size, tgt_seq_len
-        _, decode_idx = decode(
+        decode_probs, decode_idx = decode(
             model,
             torch.from_numpy(user_features).to(device),
             vocab_features,
@@ -201,6 +203,8 @@ def data_gen(
             greedy=False
         )
         tgt_idx_with_start_sym[:, 1:1 + tgt_seq_len] = decode_idx
+        # tgt sequence probabilities, used for off-policy importance sampling correciton
+        tgt_probs = torch.prod(torch.gather(decode_probs, 2, decode_idx.unsqueeze(-1)).squeeze(), -1)
         model.train()
 
         for i in range(batch_size):
@@ -219,6 +223,7 @@ def data_gen(
             src_features=torch.from_numpy(src_features).to(device),
             tgt_features_with_start_sym=torch.from_numpy(tgt_features).to(device),
             rewards=torch.from_numpy(rewards).to(device),
+            tgt_probs=tgt_probs,
             padding_symbol=padding_symbol,
         )
 
