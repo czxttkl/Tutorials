@@ -413,7 +413,7 @@ class Batch:
     def __init__(self, user_features, src_mask, trg_idx, src_features, tgt_features, padding_symbol):
         # user_features shape: batch_size, user_dim
         # src_src_mask shape: batch_size, seq_len + 1, seq_len + 1
-        # tgt_idx shape: batch_size, seq_len + 1
+        # tgt_in_idx shape: batch_size, seq_len + 1
         # src_embed shape: batch_size, seq_len, vocab_dim
         # tgt_embed shape: batch_size, seq_len + 1, vocab_dim
 

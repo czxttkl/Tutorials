@@ -120,7 +120,7 @@ def data_gen(vocab_size, user_dim, vocab_dim, batch_size, num_batches, max_seq_l
         src_idx = np.full((batch_size, max_seq_len), padding_symbol).astype(np.long)
         # src_src_mask shape: batch_size x seq_len x seq_len
         src_mask = np.ones((batch_size, max_seq_len, max_seq_len)).astype(np.int8)
-        # tgt_idx shape: batch_size x (seq_len + 1)
+        # tgt_in_idx shape: batch_size x (seq_len + 1)
         tgt_idx = np.full((batch_size, max_seq_len + 1), padding_symbol).astype(np.long)
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len

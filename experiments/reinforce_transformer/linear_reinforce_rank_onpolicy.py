@@ -90,7 +90,7 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
         eval_res = eval_function(log_probs.cpu().detach().numpy(), batch.rewards.cpu().detach().numpy())
 
         ntokens = batch.ntokens.cpu().numpy()
-        total_eval_res.append(eval_res)
+        total_eval_res.append(eval_res[0])
         total_rl_loss += rl_loss
         total_baseline_loss += baseline_loss
         tmp_tokens += ntokens
@@ -115,7 +115,8 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
             start = time.time()
             tmp_tokens = 0
 
-        if eval_res[0] > -0.1:
+        if np.all(np.array(total_eval_res[-10:]) > -0.05):
+            print(total_eval_res[-20:])
             break
 
     return total_rl_loss / (i + 1), total_baseline_loss / (i + 1)
@@ -133,14 +134,13 @@ def decode(
         tgt_features_with_start_sym=None,
         rewards=None,
         tgt_probs=None,
-        padding_symbol=PADDING_SYMBOL,
     )
     decoder_probs, tgt_idx = model(batch, mode="decode", tgt_seq_len=tgt_seq_len, greedy=greedy)
     return decoder_probs, tgt_idx
 
 
 def data_gen(
-    model, user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, start_symbol, padding_symbol, reward_function, device
+    model, user_dim, vocab_dim, batch_size, num_batches, max_seq_len, tgt_seq_len, reward_function, device
 ):
     """
     Generate random data for a src-tgt copy task.
@@ -148,8 +148,8 @@ def data_gen(
     for _ in range(num_batches):
         user_features = np.random.randn(batch_size, user_dim).astype(np.float32)
         vocab_features = np.random.randn(batch_size, VOCAB_SIZE, VOCAB_DIM).astype(np.float32)
-        vocab_features[:, padding_symbol] = 0.0
-        vocab_features[:, start_symbol] = 0.0
+        vocab_features[:, PADDING_SYMBOL] = 0.0
+        vocab_features[:, START_SYMBOL] = 0.0
         # the last dim is the sum of all other dims
         vocab_features[:, :, -1] = np.sum(vocab_features[:, :, :-1], axis=-1)
 
@@ -158,14 +158,14 @@ def data_gen(
         # truth_idx shape: batch_size
         truth_idx = np.zeros((batch_size, tgt_seq_len)).astype(np.long)
         # src_idx shape: batch_size x seq_len
-        src_idx = np.full((batch_size, max_seq_len), padding_symbol).astype(np.long)
+        src_idx = np.full((batch_size, max_seq_len), PADDING_SYMBOL).astype(np.long)
         # src_src_mask shape: batch_size x seq_len x seq_len
         src_src_mask = np.ones((batch_size, max_seq_len, max_seq_len)).astype(np.int8)
         # tgt_idx_with_start_sym shape: batch_size x (seq_len + 1)
-        tgt_idx_with_start_sym = np.full((batch_size, tgt_seq_len + 1), padding_symbol).astype(np.long)
+        tgt_idx_with_start_sym = np.full((batch_size, tgt_seq_len + 1), PADDING_SYMBOL).astype(np.long)
         # the first column is starting symbol, used to kick off the decoder
         # the last seq_len columns are real sequence data in shape: batch_size, seq_len
-        tgt_idx_with_start_sym[:, 0] = start_symbol
+        tgt_idx_with_start_sym[:, 0] = START_SYMBOL
 
         # src_features shape: batch_size x seq_len x vocab_dim
         # tgt_features shape: batch_size x (seq_len + 1) x vocab_dim
@@ -178,8 +178,8 @@ def data_gen(
 
             # symbol 0 is used for padding and symbol 1 is used for starting symbol.
             src_idx[i] = np.arange(VOCAB_SIZE)[2:]
-            src_idx[i, random_seq_len:] = padding_symbol
-            src_src_mask[i] = np.tile(src_idx[i] != padding_symbol, (max_seq_len, 1))
+            src_idx[i, random_seq_len:] = PADDING_SYMBOL
+            src_src_mask[i] = np.tile(src_idx[i] != PADDING_SYMBOL, (max_seq_len, 1))
             src_features[i] = embedding(src_idx[i], vocab_features[i])
 
             order = 1. if np.sum(user_features[i]) > 0 else -1.
@@ -220,7 +220,6 @@ def data_gen(
             tgt_features_with_start_sym=torch.from_numpy(tgt_features).to(device),
             rewards=torch.from_numpy(rewards).to(device),
             tgt_probs=tgt_probs,
-            padding_symbol=padding_symbol,
         )
 
 
@@ -284,8 +283,6 @@ for epoch in range(EPOCH_NUM):
             num_batches=NUM_TRAIN_BATCHES,
             max_seq_len=MAX_SEQ_LEN,
             tgt_seq_len=TARGET_SEQ_LEN,
-            start_symbol=START_SYMBOL,
-            padding_symbol=PADDING_SYMBOL,
             reward_function=reward_function,
             device=device,
         ),
