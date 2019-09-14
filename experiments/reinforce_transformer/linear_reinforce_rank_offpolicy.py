@@ -69,7 +69,7 @@ def make_model(
     # Initialize parameters with Glorot / fan_avg.
     for p in model.parameters():
         if p.dim() > 1:
-            nn.init.xavier_uniform(p)
+            nn.init.xavier_uniform_(p)
     return model
 
 
@@ -193,7 +193,7 @@ def data_gen(
             tgt_idx_with_start_sym[i, 1:1 + tgt_seq_len] = np.random.permutation(sort_idx)[:tgt_seq_len]
             tgt_features[i] = embedding(tgt_idx_with_start_sym[i], vocab_features[i])
             rewards[i] = reward_function(user_features[i], vocab_features[i], tgt_idx_with_start_sym[i, 1:], truth_idx[i])
-            tgt_probs[i] = reduce(lambda a, b: 1./(a*b), range(random_seq_len, random_seq_len-tgt_seq_len, -1))
+            tgt_probs[i] = 1. / reduce(lambda a, b: a*b, range(tgt_seq_len, 0, -1))
 
         # tgt will be further separated into trg (first seq_len columns, including the starting symbol)
         # and trg_y (last seq_len columns, not including the starting symbol) in Batch constructor
