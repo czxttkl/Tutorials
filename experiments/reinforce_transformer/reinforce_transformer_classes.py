@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from typing import Optional
 import scipy.stats as stats
 from itertools import combinations
 from common import START_SYMBOL, PADDING_SYMBOL
@@ -68,6 +69,69 @@ def attention(query, key, value, mask):
     return attn, p_attn
 
 
+class Batch:
+    "Object for holding a batch of data with mask during training."
+
+    def __init__(
+        self,
+        user_features,
+        src_src_mask,
+        tgt_idx_with_start_sym,
+        truth_idx,
+        src_features,
+        tgt_features_with_start_sym,
+        rewards,
+        tgt_probs,
+    ):
+        # user_features shape: batch_size, user_dim
+        # src_src_mask shape: batch_size, seq_len, seq_len
+        # tgt_idx_with_start_sym shape: batch_size, tgt_seq_len + 1
+        # truth_idx shape: batch_size, tgt_seq_len
+        # src_features shape: batch_size, seq_len, vocab_dim
+        # tgt_features_with_start_sym shape: batch_size, tgt_seq_len + 1, vocab_dim (including the feature of starting symbol)
+        # rewards shape: batch_size
+        # tgt_probs shape: batch_size
+
+        self.src_src_mask = src_src_mask
+        self.user_features = user_features
+        self.rewards = rewards
+        self.tgt_probs = tgt_probs
+        self.truth_idx = truth_idx
+
+        if tgt_idx_with_start_sym is not None:
+            # igt_idx shape: batch_size, tgt_seq_len
+            self.tgt_in_idx = tgt_idx_with_start_sym[:, :-1]
+            # tgt_out_idx shape: batch_size, tgt_seq_len
+            self.tgt_out_idx = tgt_idx_with_start_sym[:, 1:]
+            # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
+            self.tgt_tgt_mask = self.make_std_mask(self.tgt_in_idx)
+            # tgt_features shape: batch_size x seq_len x vocab_dim
+            self.tgt_features = tgt_features_with_start_sym[:, :-1, :]
+            # ntoken shape: batch_size * seq_len
+            self.ntokens = (self.tgt_out_idx != PADDING_SYMBOL).data.sum()
+        else:
+            self.tgt_in_idx = None
+            self.tgt_out_idx = None
+            self.tgt_tgt_mask = None
+            self.tgt_features = None
+            self.ntokens = None
+
+        # src_features shape: batch_size x seq_len x vocab_dim
+        self.src_features = src_features
+
+    @staticmethod
+    def make_std_mask(tgt_in_idx):
+        "Create a mask to hide padding and future words."
+        # tgt_in_idx shape: batch_size, seq_len
+        # tgt_mask shape: batch_size, 1, seq_len
+        tgt_mask = (tgt_in_idx != PADDING_SYMBOL).unsqueeze(-2)
+        # subseq_mask shape: 1, seq_len, seq_len
+        subseq_mask = subsequent_mask(tgt_in_idx.size(-1)).type_as(tgt_mask.data)
+        # tgt_mask shape: batch_size, seq_len, seq_len
+        tgt_mask = tgt_mask & subseq_mask
+        return tgt_mask.type(torch.int8)
+
+
 class LayerNorm(nn.Module):
     "Construct a layernorm module (See citation for details)."
 
@@ -97,7 +161,7 @@ class EncoderDecoder(nn.Module):
         self.generator = generator
         self.positional_encoding = positional_encoding
 
-    def forward(self, batch, mode=None, tgt_seq_len=None, greedy=None):
+    def forward(self, batch: Batch, mode: str, tgt_seq_len: Optional[int] = None, greedy: Optional[bool] = None):
         if mode == "log_probs":
             return self._log_probs(
                 batch.user_features,
@@ -542,69 +606,6 @@ class NoamOpt:
         return self.factor * (
             self.dim_model ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5))
         )
-
-
-class Batch:
-    "Object for holding a batch of data with mask during training."
-
-    def __init__(
-        self,
-        user_features,
-        src_src_mask,
-        tgt_idx_with_start_sym,
-        truth_idx,
-        src_features,
-        tgt_features_with_start_sym,
-        rewards,
-        tgt_probs,
-    ):
-        # user_features shape: batch_size, user_dim
-        # src_src_mask shape: batch_size, seq_len, seq_len
-        # tgt_idx_with_start_sym shape: batch_size, tgt_seq_len + 1
-        # truth_idx shape: batch_size, tgt_seq_len
-        # src_features shape: batch_size, seq_len, vocab_dim
-        # tgt_features_with_start_sym shape: batch_size, tgt_seq_len + 1, vocab_dim (including the feature of starting symbol)
-        # rewards shape: batch_size
-        # tgt_probs shape: batch_size
-
-        self.src_src_mask = src_src_mask
-        self.user_features = user_features
-        self.rewards = rewards
-        self.tgt_probs = tgt_probs
-        self.truth_idx = truth_idx
-
-        if tgt_idx_with_start_sym is not None:
-            # igt_idx shape: batch_size, tgt_seq_len
-            self.tgt_in_idx = tgt_idx_with_start_sym[:, :-1]
-            # tgt_out_idx shape: batch_size, tgt_seq_len
-            self.tgt_out_idx = tgt_idx_with_start_sym[:, 1:]
-            # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
-            self.tgt_tgt_mask = self.make_std_mask(self.tgt_in_idx)
-            # tgt_features shape: batch_size x seq_len x vocab_dim
-            self.tgt_features = tgt_features_with_start_sym[:, :-1, :]
-            # ntoken shape: batch_size * seq_len
-            self.ntokens = (self.tgt_out_idx != PADDING_SYMBOL).data.sum()
-        else:
-            self.tgt_in_idx = None
-            self.tgt_out_idx = None
-            self.tgt_tgt_mask = None
-            self.tgt_features = None
-            self.ntokens = None
-
-        # src_features shape: batch_size x seq_len x vocab_dim
-        self.src_features = src_features
-
-    @staticmethod
-    def make_std_mask(tgt_in_idx):
-        "Create a mask to hide padding and future words."
-        # tgt_in_idx shape: batch_size, seq_len
-        # tgt_mask shape: batch_size, 1, seq_len
-        tgt_mask = (tgt_in_idx != PADDING_SYMBOL).unsqueeze(-2)
-        # subseq_mask shape: 1, seq_len, seq_len
-        subseq_mask = subsequent_mask(tgt_in_idx.size(-1)).type_as(tgt_mask.data)
-        # tgt_mask shape: batch_size, seq_len, seq_len
-        tgt_mask = tgt_mask & subseq_mask
-        return tgt_mask.type(torch.int8)
 
 
 # # Test LabelSmoothing

@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import NamedTuple
+
 
 class MyModule(nn.Module):
     def __init__(self):
@@ -29,6 +31,7 @@ m.eval()
 print(m(test_input, "a").requires_grad)
 with torch.no_grad():
     print(m(test_input, "a").requires_grad)
+
 
 
 
