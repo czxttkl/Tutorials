@@ -40,8 +40,23 @@ def subsequent_mask(size):
     in which an item should not attend subsequent items.
     """
     attn_shape = (1, size, size)
-    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype("uint8")
-    return torch.from_numpy(subsequent_mask) == 0
+    subsequent_mask = (1 - torch.triu(torch.ones(*attn_shape), diagonal=1)).type(
+        torch.int8
+    )
+    return subsequent_mask
+
+
+def subsequent_and_padding_mask(tgt_in_idx):
+    """ Create a mask to hide padding and future items """
+    # tgt_in_idx shape: batch_size, seq_len
+
+    # tgt_tgt_mask shape: batch_size, 1, seq_len
+    tgt_tgt_mask = (tgt_in_idx != PADDING_SYMBOL).unsqueeze(-2).type(torch.int8)
+    # subseq_mask shape: 1, seq_len, seq_len
+    subseq_mask = subsequent_mask(tgt_in_idx.size(-1))
+    # tgt_tgt_mask shape: batch_size, seq_len, seq_len
+    tgt_tgt_mask = tgt_tgt_mask & subseq_mask
+    return tgt_tgt_mask
 
 
 def clones(module, N):
@@ -104,7 +119,7 @@ class Batch:
             # tgt_out_idx shape: batch_size, tgt_seq_len
             self.tgt_out_idx = tgt_idx_with_start_sym[:, 1:]
             # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
-            self.tgt_tgt_mask = self.make_std_mask(self.tgt_in_idx)
+            self.tgt_tgt_mask = subsequent_and_padding_mask(self.tgt_in_idx)
             # tgt_features shape: batch_size x seq_len x vocab_dim
             self.tgt_features = tgt_features_with_start_sym[:, :-1, :]
             # ntoken shape: batch_size * seq_len
@@ -118,18 +133,6 @@ class Batch:
 
         # src_features shape: batch_size x seq_len x vocab_dim
         self.src_features = src_features
-
-    @staticmethod
-    def make_std_mask(tgt_in_idx):
-        "Create a mask to hide padding and future words."
-        # tgt_in_idx shape: batch_size, seq_len
-        # tgt_mask shape: batch_size, 1, seq_len
-        tgt_mask = (tgt_in_idx != PADDING_SYMBOL).unsqueeze(-2)
-        # subseq_mask shape: 1, seq_len, seq_len
-        subseq_mask = subsequent_mask(tgt_in_idx.size(-1)).type_as(tgt_mask.data)
-        # tgt_mask shape: batch_size, seq_len, seq_len
-        tgt_mask = tgt_mask & subseq_mask
-        return tgt_mask.type(torch.int8)
 
 
 class LayerNorm(nn.Module):
@@ -180,28 +183,29 @@ class EncoderDecoder(nn.Module):
         """ Decode sequences based on given inputs """
         device = src_features.device
         batch_size, src_seq_len, vocab_dim = src_features.shape
+        vocab_size = src_seq_len + 2
         # vocab_features is used as look-up table for vocab features.
         # the second dim is src_seq_len + 2 because we also want to include features of start symbol and padding symbol
-        vocab_features = np.zeros((batch_size, src_seq_len + 2, vocab_dim)).astype(np.float32)
-        vocab_features[:, 2:, :] = src_features.numpy()
-        vocab_size = vocab_features.shape[1]
+        vocab_features = torch.zeros(batch_size, src_seq_len + 2, vocab_dim).to(device)
+        vocab_features[:, 2:, :] = src_features
 
-        tgt_in_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long)
-        decoder_probs = torch.zeros(batch_size, tgt_seq_len, vocab_size)
+        tgt_in_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long).to(device)
+        decoder_probs = torch.zeros(batch_size, tgt_seq_len, vocab_size).to(device)
 
         memory = self.encode(user_features, src_features, src_src_mask)
 
         for l in range(tgt_seq_len):
-            tgt_features = torch.tensor(
-                [embedding(tgt_in_idx[i], vocab_features[i]) for i in range(batch_size)]
-            ).to(device)
+            tgt_features = vocab_features[
+                torch.arange(batch_size).repeat_interleave(l + 1),
+                tgt_in_idx.flatten(),
+            ].view(batch_size, l + 1, -1).to(device)
             tgt_src_mask = src_src_mask[:, :l + 1, :]
             out = self.decode(
                 memory=memory,
                 user_features=user_features,
                 tgt_src_mask=tgt_src_mask,
                 tgt_features=tgt_features,
-                tgt_tgt_mask=subsequent_mask(tgt_in_idx.size(1)).type(torch.long).to(device),
+                tgt_tgt_mask=subsequent_mask(tgt_in_idx.size(1)).to(device),
             )
             # next word shape: batch_size, 1
             # prob shape: batch_size, vocab_size
@@ -213,7 +217,7 @@ class EncoderDecoder(nn.Module):
             )
             decoder_probs[:, l, :] = prob
             tgt_in_idx = torch.cat(
-                [tgt_in_idx, next_word.cpu()],
+                [tgt_in_idx, next_word],
                 dim=1,
             ).to(device)
         # remove the starting symbol
@@ -677,12 +681,12 @@ class ReinforceLossCompute:
 
         # importance sampling
         if not self.on_policy:
-            probs = torch.exp(log_probs.detach()) / tgt_probs
+            importance_sampling = torch.exp(log_probs.detach()) / tgt_probs
         else:
-            probs = 1
+            importance_sampling = 1
         # add negative sign because we take gradient descent but we want to maximize rewards
         # rl_loss = - 1. / batch_size * torch.sum(log_probs * (reward - b))
-        batch_loss = -probs * log_probs * (reward - b)
+        batch_loss = -importance_sampling * log_probs * (reward - b)
         rl_loss = 1. / batch_size * torch.sum(batch_loss)
         rl_loss.backward()
         if self.rl_opt:

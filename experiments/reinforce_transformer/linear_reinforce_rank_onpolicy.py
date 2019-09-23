@@ -12,7 +12,6 @@ from reinforce_transformer_classes import (
     eval_function_high_reward_prob,
     reward_function_pairwise,
     embedding,
-    subsequent_mask,
     ReinforceLossCompute,
     BaselineNN,
     VocabEmbedder,
