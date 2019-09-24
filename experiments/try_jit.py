@@ -54,6 +54,7 @@ class MyModuleUp(nn.Module):
     def forward(self, batch: Batch):
         return self.base_model(batch.input, "a")
 
+
 class MyModuleUpUp(nn.Module):
     def __init__(self, base_model):
         super().__init__()

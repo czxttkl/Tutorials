@@ -94,6 +94,7 @@ class Batch:
         tgt_idx_with_start_sym,
         truth_idx,
         src_features,
+        src_in_idx,
         tgt_features_with_start_sym,
         rewards,
         tgt_probs,
@@ -103,14 +104,17 @@ class Batch:
         # tgt_idx_with_start_sym shape: batch_size, tgt_seq_len + 1
         # truth_idx shape: batch_size, tgt_seq_len
         # src_features shape: batch_size, seq_len, vocab_dim
+        # src_in_idx shape: batch_size, seq_len
         # tgt_features_with_start_sym shape: batch_size, tgt_seq_len + 1, vocab_dim (including the feature of starting symbol)
         # rewards shape: batch_size
         # tgt_probs shape: batch_size
 
+        self.src_in_idx = src_in_idx
         self.src_src_mask = src_src_mask
         self.user_features = user_features
         self.rewards = rewards
         self.tgt_probs = tgt_probs
+        self.src_features = src_features
         self.truth_idx = truth_idx
 
         if tgt_idx_with_start_sym is not None:
@@ -131,8 +135,6 @@ class Batch:
             self.tgt_features = None
             self.ntokens = None
 
-        # src_features shape: batch_size x seq_len x vocab_dim
-        self.src_features = src_features
 
 
 class LayerNorm(nn.Module):
@@ -155,7 +157,16 @@ class EncoderDecoder(nn.Module):
     Encoder-Decoder architecture
     """
 
-    def __init__(self, encoder, decoder, vocab_embedder, user_embedder, generator, positional_encoding):
+    def __init__(
+        self,
+        encoder,
+        decoder,
+        vocab_embedder,
+        user_embedder,
+        generator,
+        positional_encoding,
+        dim_model,
+    ):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -163,6 +174,9 @@ class EncoderDecoder(nn.Module):
         self.user_embedder = user_embedder
         self.generator = generator
         self.positional_encoding = positional_encoding
+        self.dim_model = dim_model
+        self.padding_mask_param = torch.nn.Parameter(torch.zeros(dim_model))
+        self.decoder_start_mask_param = torch.nn.Parameter(torch.zeros(dim_model))
 
     def forward(self, batch: Batch, mode: str, tgt_seq_len: Optional[int] = None, greedy: Optional[bool] = None):
         if mode == "log_probs":
@@ -172,14 +186,15 @@ class EncoderDecoder(nn.Module):
                 batch.tgt_features,
                 batch.src_src_mask,
                 batch.tgt_tgt_mask,
+                batch.src_in_idx,
                 batch.tgt_in_idx,
                 batch.tgt_out_idx,
             )
-        elif mode == "decode":
+        elif mode == "rank":
             assert tgt_seq_len is not None and greedy is not None
-            return self._decode_seq(batch.user_features, batch.src_features, batch.src_src_mask, tgt_seq_len, greedy)
+            return self._rank(batch.user_features, batch.src_features, batch.src_src_mask, batch.src_in_idx, tgt_seq_len, greedy)
 
-    def _decode_seq(self, user_features, src_features, src_src_mask, tgt_seq_len, greedy):
+    def _rank(self, user_features, src_features, src_src_mask, src_in_idx, tgt_seq_len, greedy):
         """ Decode sequences based on given inputs """
         device = src_features.device
         batch_size, src_seq_len, vocab_dim = src_features.shape
@@ -192,7 +207,7 @@ class EncoderDecoder(nn.Module):
         tgt_in_idx = torch.ones(batch_size, 1).fill_(START_SYMBOL).type(torch.long).to(device)
         decoder_probs = torch.zeros(batch_size, tgt_seq_len, vocab_size).to(device)
 
-        memory = self.encode(user_features, src_features, src_src_mask)
+        memory = self.encode(user_features, src_features, src_in_idx, src_src_mask)
 
         for l in range(tgt_seq_len):
             tgt_features = vocab_features[
@@ -205,7 +220,8 @@ class EncoderDecoder(nn.Module):
                 user_features=user_features,
                 tgt_src_mask=tgt_src_mask,
                 tgt_features=tgt_features,
-                tgt_tgt_mask=subsequent_mask(tgt_in_idx.size(1)).to(device),
+                tgt_tgt_mask=subsequent_mask(l + 1).to(device),
+                tgt_seq_len=l+1,
             )
             # next word shape: batch_size, 1
             # prob shape: batch_size, vocab_size
@@ -225,12 +241,14 @@ class EncoderDecoder(nn.Module):
         tgt_in_idx = tgt_in_idx[:, 1:]
         return decoder_probs, tgt_in_idx
 
-    def _log_probs(self, user_features, src_features, tgt_features, src_src_mask, tgt_tgt_mask, tgt_in_idx, tgt_out_idx):
+    def _log_probs(
+        self, user_features, src_features, tgt_features, src_src_mask, tgt_tgt_mask, src_in_idx, tgt_in_idx, tgt_out_idx
+    ):
         """
         Compute log of generative probabilities of given tgt sequences (used for REINFORCE training)
         """
         # encoder_output shape: batch_size, seq_len + 1, dim_model
-        encoder_output = self.encode(user_features, src_features, src_src_mask)
+        encoder_output = self.encode(user_features, src_features, src_in_idx, src_src_mask)
 
         tgt_seq_len = tgt_features.shape[1]
         src_seq_len = src_features.shape[1]
@@ -241,7 +259,12 @@ class EncoderDecoder(nn.Module):
 
         # decoder_output shape: batch_size, seq_len, dim_model
         decoder_output = self.decode(
-            encoder_output, user_features, tgt_src_mask, tgt_features, tgt_tgt_mask
+            memory=encoder_output,
+            user_features=user_features,
+            tgt_src_mask=tgt_src_mask,
+            tgt_features=tgt_features,
+            tgt_tgt_mask=tgt_tgt_mask,
+            tgt_seq_len=tgt_seq_len,
         )
         # log_probs shape: batch_size
         log_probs = self._output_to_log_prob(decoder_output, tgt_in_idx, tgt_out_idx)
@@ -268,7 +291,7 @@ class EncoderDecoder(nn.Module):
         # shape: batch_size
         return log_probs.sum(dim=1)
 
-    def encode(self, user_features, src_features, src_mask):
+    def encode(self, user_features, src_features, src_in_idx, src_src_mask):
         # user_features: batch_size, dim_user
         # src_features: batch_size, seq_len, dim_vocab
         # src_src_mask shape: batch_size, seq_len, seq_len
@@ -281,37 +304,44 @@ class EncoderDecoder(nn.Module):
         # user_embed: batch_size, seq_len, dim_model/2
         user_embed = user_embed.repeat(1, seq_len).reshape(batch_size, seq_len, -1)
 
+        concat_embed = torch.cat((user_embed, vocab_embed), dim=-1)
+
+        # since all sequences are of the same length for now, there shouldn't be any
+        # padding symbol
+        # concat_embed[src_in_idx == PADDING_SYMBOL] = self.padding_mask_param
+        # assert not torch.any(src_in_idx == PADDING_SYMBOL)
+
         # src_embed shape: batch_size, seq_len, dim_model
-        src_embed = self.positional_encoding(
-            torch.cat((user_embed, vocab_embed), dim=-1)
-        )
+        src_embed = self.positional_encoding(concat_embed, seq_len)
 
         # encoder_output shape: batch_size, seq_len + 1, dim_model
-        return self.encoder(src_embed, src_mask)
+        return self.encoder(src_embed, src_src_mask)
 
-    def decode(self, memory, user_features, tgt_src_mask, tgt_features, tgt_tgt_mask):
+    def decode(self, memory, user_features, tgt_src_mask, tgt_features, tgt_tgt_mask, tgt_seq_len):
         # memory is the output of the encoder, the attention of each input symbol
         # memory shape: batch_size, seq_len, dim_model
         # tgt_src_mask shape: batch_size, tgt_seq_len, seq_len
         # tgt_features shape: batch_size, tgt_seq_len, dim_vocab
         # tgt_tgt_mask shape: batch_size, tgt_seq_len, tgt_seq_len
-        batch_size, seq_len, _ = tgt_features.shape
+        batch_size = tgt_features.shape[0]
 
-        # decoder_input_embed shape: batch_size, seq_len, dim_model/2
-        decoder_input_embed = self.vocab_embedder(tgt_features)
+        # vocab_embed shape: batch_size, seq_len, dim_model/2
+        vocab_embed = self.vocab_embedder(tgt_features)
         # user_embed: batch_size, dim_model/2
         user_embed = self.user_embedder(user_features)
         # user_embed: batch_size, seq_len, dim_model/2
-        user_embed = user_embed.repeat(1, seq_len).reshape(batch_size, seq_len, -1)
+        user_embed = user_embed.repeat(1, tgt_seq_len).reshape(batch_size, tgt_seq_len, -1)
 
-        # decoder_input_embed: batch_size, seq_len, dim_model
-        decoder_input_embed = self.positional_encoding(
-            torch.cat((user_embed, decoder_input_embed), dim=-1)
-        )
+        concat_embed = torch.cat((user_embed, vocab_embed), dim=-1)
+        # not using decoder_start_mask_param because it slows down the training
+        # concat_embed[:, 0] = self.decoder_start_mask_param
+
+        # tgt_embed: batch_size, seq_len, dim_model
+        tgt_embed = self.positional_encoding(concat_embed, tgt_seq_len)
 
         # output of decoder will be later transformed into probabilities over symbols.
         # shape: batch_size, seq_len, dim_model
-        return self.decoder(decoder_input_embed, memory, tgt_src_mask, tgt_tgt_mask)
+        return self.decoder(tgt_embed, memory, tgt_src_mask, tgt_tgt_mask)
 
 
 class Encoder(nn.Module):
@@ -574,8 +604,8 @@ class PositionalEncoding(nn.Module):
         # pe shape: 1, max_len, dim_model
         self.register_buffer("pe", pe)
 
-    def forward(self, x):
-        x = x + Variable(self.pe[:, : x.size(1)], requires_grad=False)
+    def forward(self, x, seq_len):
+        x = x + self.pe[:, :seq_len]
         return x
 
 

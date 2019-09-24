@@ -63,6 +63,7 @@ def make_model(
         user_embedder=UserEmbedder(user_dim, dim_model),
         generator=Generator(dim_model, vocab_size),
         positional_encoding=c(position),
+        dim_model=dim_model,
     ).to(device)
 
     # This was important from their code.
@@ -125,7 +126,7 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
 
 
 def decode(
-    model, user_features, vocab_features, src_features, src_src_mask, tgt_seq_len, greedy
+    model, user_features, src_features, src_idx, src_src_mask, tgt_seq_len, greedy
 ):
     batch = Batch(
         user_features=user_features,
@@ -133,11 +134,12 @@ def decode(
         tgt_idx_with_start_sym=None,
         truth_idx=None,
         src_features=src_features,
+        src_in_idx=src_idx,
         tgt_features_with_start_sym=None,
         rewards=None,
         tgt_probs=None,
     )
-    decoder_probs, tgt_idx = model(batch, mode="decode", tgt_seq_len=tgt_seq_len, greedy=greedy)
+    decoder_probs, tgt_idx = model(batch, mode="rank", tgt_seq_len=tgt_seq_len, greedy=greedy)
     return decoder_probs, tgt_idx
 
 
@@ -205,6 +207,7 @@ def data_gen(
             tgt_idx_with_start_sym=torch.from_numpy(tgt_idx_with_start_sym).to(device),
             truth_idx=torch.from_numpy(truth_idx).to(device),
             src_features=torch.from_numpy(src_features).to(device),
+            src_in_idx=torch.from_numpy(src_idx).to(device),
             tgt_features_with_start_sym=torch.from_numpy(tgt_features).to(device),
             rewards=torch.from_numpy(rewards).to(device),
             tgt_probs=torch.from_numpy(tgt_probs).to(device),
@@ -295,10 +298,13 @@ for i in range(test_batch_size):
 
 user_features = torch.from_numpy(user_features).to(device)
 src_features = torch.from_numpy(vocab_features[:, 2:, :]).to(device)
+src_idx = torch.from_numpy(
+    np.tile(np.arange(VOCAB_SIZE)[2:], (test_batch_size, 1))
+).to(device)
 src_src_mask = torch.from_numpy(
     np.ones((test_batch_size, MAX_SEQ_LEN, MAX_SEQ_LEN))
 ).to(device)
-decoder_probs, output_tgt = decode(model, user_features, vocab_features, src_features, src_src_mask, TARGET_SEQ_LEN, greedy=True)
+decoder_probs, output_tgt = decode(model, user_features, src_features, src_idx, src_src_mask, TARGET_SEQ_LEN, greedy=True)
 print(f"output seq:\n{output_tgt}")
 print(f"decoder probs:\n{decoder_probs}")
 
