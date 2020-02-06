@@ -119,7 +119,7 @@ def run_epoch(epoch, data_iter, model, baseline, loss_compute, eval_function):
 
         # off-policy learning is not stable. So once eval_res[0] (log prob of sequences whose rewards are the highest)
         #  is below -0.1, it is a good sign of successful learning
-        if eval_res[0] > -0.1:
+        if eval_res[1] > 0.7:
             break
 
     return total_rl_loss / (i + 1), total_baseline_loss / (i + 1)
@@ -216,8 +216,8 @@ def data_gen(
 
 DIM_USER = 4
 VOCAB_DIM = 5
-MAX_SEQ_LEN = 3
-TARGET_SEQ_LEN = 3
+MAX_SEQ_LEN = 4
+TARGET_SEQ_LEN = 4
 VOCAB_SIZE = MAX_SEQ_LEN + 2
 EPOCH_NUM = 1
 DIM_MODEL = 32
